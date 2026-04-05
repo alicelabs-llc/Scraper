@@ -1,20 +1,72 @@
 <div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+
+# Scraper
+**AI-powered product research tool for ecommerce sellers**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-238636?style=flat-square)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-Strict-3178C6?style=flat-square&logo=typescript)](https://www.typescriptlang.org/)
+[![Gemini](https://img.shields.io/badge/Powered%20by-Gemini-4285F4?style=flat-square&logo=google)](https://ai.google.dev/)
+
+Find winning products before your competitors do. Scraper uses Gemini + Google Search to surface trending products across TikTok Shop, Amazon, and global marketplaces in real time.
+
+Built by [AliceLabs LLC](https://alicelabs.site)
+
 </div>
 
-# Run and deploy your AI Studio app
+---
 
-This contains everything you need to run your app locally.
+## What it does
 
-View your app in AI Studio: https://ai.studio/apps/drive/1gTs7PxJaABdgZDMlSNUY_6nMGzHHu6PE
+- **Winning product finder** — scans TikTok Shop, Amazon, and global marketplaces for trending products with high margins
+- **Niche analysis** — scores niches by opportunity level (High Opportunity / Moderate / Saturated / Stable)
+- **Market trends dashboard** — visualizes revenue trends, growth rates, and seller competition
+- **AI assistant** — ask questions about any niche or product and get instant market intelligence
+- **Multi-language** — supports English, Spanish, French, German, and Chinese
 
-## Run Locally
+## Tech stack
 
-**Prerequisites:**  Node.js
+- React + TypeScript
+- Vite
+- Google Gemini API (with Google Search grounding)
+- Tailwind CSS
 
+## Quick start
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+**Prerequisites:** Node.js 18+, Gemini API key
+
+```bash
+git clone https://github.com/alicelabs-llc/Scraper.git
+cd Scraper
+npm install
+```
+
+Create a `.env.local` file:
+
+```env
+API_KEY=your_gemini_api_key_here
+```
+
+Run locally:
+
+```bash
+npm run dev
+```
+
+## Pages
+
+| Page | Description |
+|------|-------------|
+| Dashboard | Market metrics overview with trend sparklines |
+| Daily Finder | Today's top trending products with scores |
+| Product Details | Deep dive into any product — margin, competition, why it's winning |
+| Analysis | Niche-level breakdown and opportunity scoring |
+| AI Assistant | Chat interface for market research questions |
+| Settings | Language and user preferences |
+
+## Use case
+
+Built for dropshippers, Amazon FBA sellers, and TikTok Shop creators who need to identify winning products fast without manual research. Scraper automates the research process using live Google Search data grounded through Gemini.
+
+---
+
+© 2026 AliceLabs LLC · [alicelabs.site](https://alicelabs.site) · [contacto@alicelabs.site](mailto:contacto@alicelabs.site)
