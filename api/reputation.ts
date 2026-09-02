@@ -1,5 +1,5 @@
 /**
- * api/reputation.ts — UTA Domain Reputation Endpoint (uta-reputation-v1.1)
+ * api/reputation.ts — UTA Domain Reputation Endpoint (uta-reputation-v1.2)
  *
  * The HTTP surface of the Source Safety Gate: ANY app, bot or AI agent can
  * ask "can I trust this domain?" and get a deterministic, transparent verdict.

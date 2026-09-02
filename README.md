@@ -77,26 +77,26 @@ Built for dropshippers, Amazon FBA sellers, and TikTok Shop creators who need to
 
 ## Domain Reputation API (`/api/reputation`)
 
-**LIVE: `https://uta-reputation.vercel.app/api/reputation`** (alias) · also `https://uta-reputation.vercel.app/api/reputation` — free, public, keyless. Every source link shown in ProdIntel passes a **Source Safety Gate** before display: a deterministic domain-reputation engine (marketplace allowlist, shorteners, punycode, raw IPs, brand typosquats, low-barrier hosts, abused TLDs, redirect params). The same engine is exposed as a **public HTTP endpoint** so any app, bot, or AI agent can ask "can I trust this domain?" — no API key, no registration.
+**LIVE: `https://prodintel-two.vercel.app/api/reputation`** — free, public, keyless. Every source link shown in ProdIntel passes a **Source Safety Gate** before display: a deterministic domain-reputation engine (marketplace allowlist, shorteners, punycode, raw IPs, brand typosquats, low-barrier hosts, abused TLDs, redirect params). The same engine is exposed as a **public HTTP endpoint** so any app, bot, or AI agent can ask "can I trust this domain?" — no API key, no registration.
 
 ```bash
 # Verdict for any URL or bare domain
-curl "https://uta-reputation.vercel.app/api/reputation?domain=aliexpress.com"
-curl "https://uta-reputation.vercel.app/api/reputation?url=https://bit.ly/x"
+curl "https://prodintel-two.vercel.app/api/reputation?domain=aliexpress.com"
+curl "https://prodintel-two.vercel.app/api/reputation?url=https://bit.ly/x"
 
 # POST also works
-curl -X POST "https://uta-reputation.vercel.app/api/reputation" \
+curl -X POST "https://prodintel-two.vercel.app/api/reputation" \
   -H "Content-Type: application/json" -d '{"url": "https://amaz0n-deals.net/shop"}'
 
 # Availability probe
-curl "https://uta-reputation.vercel.app/api/reputation?probe=1"
+curl "https://prodintel-two.vercel.app/api/reputation?probe=1"
 ```
 
 Response (deterministic per `engine` version, CDN-cacheable 24h):
 
 ```json
 {
-  "engine": "uta-reputation-v1.1",
+  "engine": "uta-reputation-v1.2",
   "domain": "bit.ly",
   "verdict": "risky",
   "score": 8,
@@ -106,7 +106,7 @@ Response (deterministic per `engine` version, CDN-cacheable 24h):
 
 Verdicts: `trusted` (95) · `unknown` (55) · `caution` (35) · `risky` (8), always with transparent reasons. The client runs the identical engine locally — badges render instantly offline, then get server-confirmed (the `UTA` chip) when the endpoint is reachable; on failure it degrades silently. Fail-closed semantics for *actions* (as opposed to display) are the caller's policy — see the spec in [`alicelabs-llc/universal-trust-adapter · api/reputation-spec.md`](https://github.com/alicelabs-llc/universal-trust-adapter/blob/main/api/reputation-spec.md).
 
-**Deploy:** the app + API are live at **https://uta-reputation.vercel.app** (short alias) / https://prodintel-two.vercel.app (static mirror: https://alicelabs-llc.github.io/Scraper/). The repo ships `vercel.json` + the Edge Function in `api/` — import it into any Vercel account (or `npx vercel --prod`) and app + API deploy together in one shot.
+**Deploy:** the app + API are live at **https://prodintel-two.vercel.app** (static mirror: https://alicelabs-llc.github.io/Scraper/). The repo ships `vercel.json` + the API route in `api/` — import it into any Vercel account (or `npx vercel --prod`) and app + API deploy together in one shot.
 
 ---
 

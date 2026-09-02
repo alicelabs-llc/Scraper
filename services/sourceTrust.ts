@@ -1,6 +1,6 @@
 
 /**
- * sourceTrust.ts — Source Safety Gate / Domain Reputation Engine for ProdIntel (v1.1).
+ * sourceTrust.ts — Source Safety Gate / Domain Reputation Engine for ProdIntel (v1.2).
  *
  * WHAT THIS IS (honest): a deterministic, transparent domain-reputation engine.
  * It runs in TWO places from this single source of truth:
@@ -30,7 +30,7 @@
 export type SourceStatus = 'marketplace' | 'external' | 'caution' | 'risky';
 export type TrustVerdict = 'trusted' | 'unknown' | 'caution' | 'risky';
 
-export const REPUTATION_ENGINE_VERSION = 'uta-reputation-v1.1';
+export const REPUTATION_ENGINE_VERSION = 'uta-reputation-v1.2';
 
 export interface SourceAssessment {
   status: SourceStatus;
@@ -119,7 +119,13 @@ export function evaluateDomain(input: string): SourceAssessment {
   }
 
   // Risky: URL shortener hides the real destination
-  if (URL_SHORTENERS.some((s) => host === s || host.endsWith('.' + s) || host.includes(s))) {
+  // v1.2 fix: match by exact host / subdomain (or platform prefix for dotted
+  // patterns). Plain substring matching flagged legit marketplaces whose names
+  // contain "t.co" inside "<name>.com" (walmart.com, target.com, homedepot.com,
+  // flipkart.com) and hosts like blogspot.com — all wrongly scored risky 8.
+  if (URL_SHORTENERS.some((s) =>
+    s.endsWith('.') ? host.startsWith(s) : (host === s || host.endsWith('.' + s))
+  )) {
     return { status: 'risky', verdict: 'risky', score: 8, domain: host, reasons: ['URL shortener (destination hidden)'] };
   }
 
