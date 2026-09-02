@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { WinningProduct, Language } from '../types';
 import { getDeepProductAnalysis } from '../services/geminiService';
 import { translations } from '../translations';
+import TrustBadge from '../components/TrustBadge';
 
 interface ProductDetailsProps {
   product: WinningProduct | null;
@@ -149,12 +150,15 @@ const ProductDetails: React.FC<ProductDetailsProps> = ({ product, lang }) => {
              </div>
 
              <div className="mt-8 pt-6 border-t border-border">
-                <h4 className="text-[10px] font-black text-text-secondary uppercase mb-4 tracking-[0.2em]">{t.source} (Live Jan 2026)</h4>
+                <h4 className="text-[10px] font-black text-text-secondary uppercase mb-4 tracking-[0.2em]">{t.source} · {t.trustTitle}</h4>
                 <div className="flex flex-wrap gap-2">
                    {analysis?.sources?.map((s: any, i: number) => (
-                     <a key={i} href={s.uri} target="_blank" rel="noopener noreferrer" className="px-3 py-2 bg-surface-light border border-border rounded-lg text-[10px] text-white hover:bg-primary hover:border-primary transition-all flex items-center gap-2 font-bold group">
-                        <span className="material-symbols-outlined text-[14px] group-hover:animate-bounce">language</span> {s.title}
-                     </a>
+                     <div key={i} className="flex items-center gap-2">
+                       <a href={s.uri} target="_blank" rel="noopener noreferrer" className="px-3 py-2 bg-surface-light border border-border rounded-lg text-[10px] text-white hover:bg-primary hover:border-primary transition-all flex items-center gap-2 font-bold group flex-1 min-w-0">
+                          <span className="material-symbols-outlined text-[14px] group-hover:animate-bounce">language</span> <span className="truncate">{s.title}</span>
+                       </a>
+                       <TrustBadge url={s.uri} lang={lang} compact />
+                     </div>
                    )) || <div className="h-8 w-32 bg-background rounded animate-pulse"></div>}
                 </div>
              </div>

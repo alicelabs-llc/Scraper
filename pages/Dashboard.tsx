@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { MetricCardProps, Language, WinningProduct } from '../types';
 import { analyzeMarketTrends } from '../services/geminiService';
+import { summarizeSources, assessSource } from '../services/sourceTrust';
 import { translations } from '../translations';
 
 interface DashboardProps {
@@ -183,6 +184,11 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
   const sparkData = history.slice(-7).map((h) => Math.round(h.avg));
 
   const maxCount = nicheCounts[0]?.count || 1;
+  const safety = useMemo(
+    () => summarizeSources(cache.items.map((p) => p.sourceUrl)),
+    [cache]
+  );
+  const hasSources = cache.items.some((p) => p.sourceUrl && p.sourceUrl.startsWith('http'));
 
   return (
     <div className="p-8 space-y-8 max-w-[1600px] mx-auto animate-in fade-in duration-500">
@@ -219,6 +225,63 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
           ))}
           <p className="text-[10px] text-text-secondary/70 uppercase tracking-widest pt-2">{t.nicheDist}</p>
         </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Source Safety Gate — evaluated BEFORE any link was shown to the user */}
+        {hasSources && (
+          <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+            <div className="px-6 py-4 border-b border-border">
+              <h3 className="text-white text-lg font-bold font-display">{t.safetyPanelTitle}</h3>
+            </div>
+            <div className="p-6 grid grid-cols-2 gap-3">
+              {([
+                { key: 'marketplace', icon: 'verified', cls: 'text-sky-400 bg-sky-500/10 border-sky-500/30' },
+                { key: 'external', icon: 'public', cls: 'text-text-secondary bg-white/5 border-white/10' },
+                { key: 'caution', icon: 'warning', cls: 'text-amber-400 bg-amber-500/10 border-amber-500/30' },
+                { key: 'risky', icon: 'gpp_bad', cls: 'text-red-400 bg-red-500/10 border-red-500/30' },
+              ] as const).map(({ key, icon, cls }) => (
+                <div key={key} className={`rounded-xl border p-4 ${cls}`}>
+                  <div className="flex items-center justify-between">
+                    <span className="material-symbols-outlined text-[18px]">{icon}</span>
+                    <span className="text-xl font-black font-display">{safety[key]}</span>
+                  </div>
+                  <p className="text-[9px] font-black uppercase tracking-wider mt-1 opacity-80">
+                    {key === 'marketplace' ? t.trustMarketplace : key === 'external' ? t.trustExternal : key === 'caution' ? t.trustCaution : t.trustRisky}
+                  </p>
+                </div>
+              ))}
+              <p className="col-span-2 text-[10px] text-text-secondary/70 uppercase tracking-widest">{t.trustNoIssues}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Scan history (real, local) */}
+        {history.length > 1 && (
+          <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+            <div className="px-6 py-4 border-b border-border">
+              <h3 className="text-white text-lg font-bold font-display">{t.scanHistoryTitle}</h3>
+            </div>
+            <div className="p-6 space-y-3">
+              {history.slice(-7).reverse().map((h, i) => (
+                <div key={i} className="flex items-center gap-4">
+                  <span className="w-20 shrink-0 text-[11px] font-mono text-text-secondary">
+                    {new Date(h.ts).toLocaleDateString(lang === 'zh' ? 'zh-CN' : lang, { month: 'short', day: 'numeric' })}
+                  </span>
+                  <div className="flex-1 h-2.5 bg-background rounded-full overflow-hidden border border-border/50">
+                    <div
+                      className="h-full bg-gradient-to-r from-emerald-500/70 to-emerald-500 rounded-full"
+                      style={{ width: `${Math.min(100, Math.max(4, (h.count / Math.max(...history.map((x) => x.count), 1)) * 100))}%` }}
+                    ></div>
+                  </div>
+                  <span className="w-24 shrink-0 text-right text-[10px] font-bold text-text-secondary font-mono">
+                    {h.count} · avg {Math.round(h.avg)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

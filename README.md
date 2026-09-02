@@ -17,11 +17,21 @@ Built by [AliceLabs LLC](https://alicelabs.site)
 
 ## What it does
 
-- **Winning product finder** — scans TikTok Shop, Amazon, and global marketplaces for trending products with high margins — grounded in live Google Search results with real source links
-- **Niche analysis** — scores niches by opportunity level (High Opportunity / Moderate / Saturated / Stable)
-- **Market trends dashboard** — visualizes revenue trends, growth rates, and seller competition
+- **Winning product finder** — scans TikTok Shop, Amazon, and global marketplaces for trending products with high margins, grounded in live Google Search with real source links
+- **Source Safety Gate** — every source link is assessed BEFORE you click it (known marketplaces, URL shorteners, punycode/homoglyphs, raw IPs, redirect params, http) with a visible badge and reasons
+- **Watchlist** — save products and track them across daily scans; CSV export included
+- **Search, niche filter & sorting** — slice a 30-product scan in seconds; genuinely NEW findings vs. your previous scan are flagged
+- **Honest dashboard** — every metric (products found, avg trend score, dominant niche, scan history, source safety breakdown) is computed from YOUR real scan data. No invented numbers.
+- **Niche analysis** — scores niches by opportunity level with market concentration (Gini index)
 - **AI assistant** — ask questions about any niche or product and get instant market intelligence
-- **Multi-language** — supports English, Spanish, French, German, and Chinese
+- **Multi-language** — English, Spanish, French, German, Chinese (UI + AI responses)
+
+## Trust & privacy
+
+- **BYOK** — your Gemini key lives only in your browser's localStorage; it is never bundled, committed, or sent to any server other than Google's API
+- **Source Safety Gate** runs 100% locally and deterministically — it never claims a "verified" status it cannot back
+- Built by [AliceLabs LLC](https://alicelabs.site) — the UTA/Sentinel trust ecosystem
+
 
 ## Tech stack
 

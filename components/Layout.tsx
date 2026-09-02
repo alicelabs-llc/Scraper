@@ -19,6 +19,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, user
       case 'dashboard': return t.dashboard;
       case 'daily-hunt': return t.dailyHunt;
       case 'analysis': return t.marketAnalysis;
+      case 'watchlist': return t.watchlist;
       case 'assistant': return t.aiAssistant;
       case 'details': return t.productDetails;
       case 'settings': return t.settings;
