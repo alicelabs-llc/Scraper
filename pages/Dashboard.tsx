@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect } from 'react';
-import { MetricCardProps, Language } from '../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { MetricCardProps, Language, WinningProduct } from '../types';
 import { analyzeMarketTrends } from '../services/geminiService';
 import { translations } from '../translations';
 
@@ -9,12 +9,13 @@ interface DashboardProps {
 }
 
 const Sparkline: React.FC<{ data: number[]; trend: 'up' | 'down' }> = ({ data, trend }) => {
+  if (data.length < 2) return null;
   const max = Math.max(...data);
   const min = Math.min(...data);
   const range = max - min || 1;
   const width = 100;
   const height = 30;
-  
+
   const points = data.map((val, i) => {
     const x = (i / (data.length - 1)) * width;
     const y = height - ((val - min) / range) * height;
@@ -45,13 +46,15 @@ const MetricCard: React.FC<MetricCardProps> = ({ label, value, change, trend, ic
     </div>
     <div className="flex items-baseline gap-2">
       <h3 className="text-white text-2xl font-bold font-display">{value}</h3>
-      <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded flex items-center ${
-        trend === 'up' ? 'text-emerald-500 bg-emerald-500/10' : 'text-red-500 bg-red-500/10'
-      }`}>
-        {change}
-      </span>
+      {change && (
+        <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded flex items-center ${
+          trend === 'up' ? 'text-emerald-500 bg-emerald-500/10' : 'text-red-500 bg-red-500/10'
+        }`}>
+          {change}
+        </span>
+      )}
     </div>
-    {trendData && <Sparkline data={trendData} trend={trend} />}
+    {trendData && trendData.length > 1 && <Sparkline data={trendData} trend={trend} />}
   </div>
 );
 
@@ -64,19 +67,21 @@ const MarketSummary: React.FC<{ lang: Language }> = ({ lang }) => {
     const fetchSummary = async () => {
       setLoading(true);
       try {
-        const query = lang === 'es' 
-          ? "tendencias generales de e-commerce y productos ganadores 2026"
-          : `General e-commerce trends and winning products for 2026 in ${lang}`;
-        const result = await analyzeMarketTrends(query);
+        const query = lang === 'es'
+          ? "tendencias generales de e-commerce y productos ganadores esta semana"
+          : `General e-commerce trends and winning products this week (${lang})`;
+        const result = await analyzeMarketTrends(query, lang);
         setSummary(result || "No data");
-      } catch (error) {
-        setSummary("Error");
+      } catch {
+        setSummary("");
       } finally {
         setLoading(false);
       }
     };
     fetchSummary();
   }, [lang]);
+
+  if (!loading && !summary) return null; // honest: if AI is unavailable, show nothing rather than a canned line
 
   return (
     <div className="relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-r from-primary/5 to-transparent p-6 mb-8">
@@ -86,7 +91,7 @@ const MarketSummary: React.FC<{ lang: Language }> = ({ lang }) => {
         </div>
         <div className="space-y-2 flex-1">
           <div className="flex items-center gap-2">
-            <h3 className="text-white font-bold font-display uppercase tracking-wider text-sm">IA Market Insight 2026</h3>
+            <h3 className="text-white font-bold font-display uppercase tracking-wider text-sm">IA Market Insight</h3>
             <span className="px-2 py-0.5 rounded bg-primary text-[10px] text-white font-bold animate-pulse">LIVE</span>
           </div>
           {loading ? (
@@ -102,44 +107,117 @@ const MarketSummary: React.FC<{ lang: Language }> = ({ lang }) => {
   );
 };
 
+interface ScanHistoryEntry { avg: number; count: number; cacheDate: string; ts: number }
+
+const readCache = (lang: Language): { date: string; items: WinningProduct[] } | null => {
+  try {
+    const raw = localStorage.getItem(`daily_products_v4_${lang}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.items)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const readHistory = (): ScanHistoryEntry[] => {
+  try {
+    const raw = localStorage.getItem('prodintel_scan_history');
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+
 const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
   const t = translations[lang];
-  const mockTrends = {
-    n: [40, 45, 42, 50, 55, 52, 60],
-    o: [7.2, 7.5, 7.8, 8.0, 8.2, 8.4],
-    e: [20, 40, 35, 60, 80, 75, 95],
-    v: [3.1, 3.4, 3.2, 3.8, 4.0, 4.2]
-  };
+
+  // Every metric below is DERIVED FROM REAL SCAN DATA (localStorage cache of Daily Hunt).
+  // No invented numbers: if the user has not scanned yet, we say so instead of faking it.
+  const cache = useMemo(() => readCache(lang), [lang]);
+
+  const history = useMemo(() => {
+    const hist = readHistory();
+    if (cache && !hist.some((h) => h.cacheDate === cache.date)) {
+      const scores = cache.items.map((p) => Number(p.trendScore) || 0);
+      const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+      hist.push({ avg, count: cache.items.length, cacheDate: cache.date, ts: Date.now() });
+      try {
+        localStorage.setItem('prodintel_scan_history', JSON.stringify(hist.slice(-30)));
+      } catch { /* storage full — metrics still render without sparkline history */ }
+    }
+    return hist;
+  }, [cache]);
+
+  const nicheCounts = useMemo(() => {
+    if (!cache) return [];
+    const counts = new Map<string, number>();
+    for (const p of cache.items) {
+      const niche = (p.niche || '—').trim();
+      counts.set(niche, (counts.get(niche) || 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, count]) => ({ name, count, pct: Math.round((count / cache.items.length) * 100) }));
+  }, [cache]);
+
+  if (!cache) {
+    return (
+      <div className="p-8 max-w-[1600px] mx-auto animate-in fade-in duration-500 space-y-8">
+        <MarketSummary lang={lang} />
+        <div className="bg-surface border border-border rounded-2xl p-16 text-center">
+          <span className="material-symbols-outlined text-6xl text-text-secondary/40 mb-6 block">radar</span>
+          <h3 className="text-white text-xl font-bold font-display">{t.emptyDash}</h3>
+          <p className="text-text-secondary text-sm mt-3 max-w-md mx-auto leading-relaxed">{t.emptyDashDesc}</p>
+        </div>
+      </div>
+    );
+  }
+
+  const scores = cache.items.map((p) => Number(p.trendScore) || 0);
+  const avgScore = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
+  const topNiche = nicheCounts[0]?.name || '—';
+  const lastScan = cache.date ? new Date(cache.date).toLocaleDateString(lang === 'zh' ? 'zh-CN' : lang, { month: 'short', day: 'numeric' }) : '—';
+  const sparkData = history.slice(-7).map((h) => Math.round(h.avg));
+
+  const maxCount = nicheCounts[0]?.count || 1;
 
   return (
     <div className="p-8 space-y-8 max-w-[1600px] mx-auto animate-in fade-in duration-500">
       <MarketSummary lang={lang} />
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <MetricCard label={t.metrics.totalNiches} value="1,240" change="+12%" trend="up" icon="dataset" trendData={mockTrends.n} />
-        <MetricCard label={t.metrics.avgOpportunity} value="8.4/10" change="+5%" trend="up" icon="score" trendData={mockTrends.o} />
-        <MetricCard label={t.metrics.trendingCategory} value="Eco Toys" change="MAX" trend="up" icon="local_mall" trendData={mockTrends.e} />
-        <MetricCard label={t.metrics.marketVolume} value="$4.2M" change="+22%" trend="up" icon="payments" trendData={mockTrends.v} />
+        <MetricCard label={t.metrics.totalNiches} value={String(cache.items.length)} change="" trend="up" icon="dataset" />
+        <MetricCard label={t.metrics.avgOpportunity} value={`${avgScore}/100`} change="" trend="up" icon="score" trendData={sparkData} />
+        <MetricCard label={t.metrics.trendingCategory} value={topNiche.length > 18 ? topNiche.slice(0, 18) + '…' : topNiche} change="" trend="up" icon="local_mall" />
+        <MetricCard label={t.metrics.marketVolume} value={lastScan} change="" trend="up" icon="schedule" />
       </div>
 
       <div className="rounded-2xl border border-border bg-surface overflow-hidden">
         <div className="px-6 py-4 border-b border-border flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h3 className="text-white text-lg font-bold font-display">{t.metrics.saturationTitle}</h3>
-            <p className="text-text-secondary text-sm">{t.metrics.saturationDesc}</p>
+            <p className="text-text-secondary text-sm">{t.metrics.saturationDesc} · {t.productsInCache}: {cache.items.length}</p>
           </div>
         </div>
-        <div className="p-6">
-           <div className="grid grid-cols-12 gap-2 h-[400px]">
-             <div className="col-span-8 bg-emerald-500/10 border-2 border-emerald-500/30 rounded-xl p-6 flex flex-col justify-end">
-                <span className="text-2xl font-bold text-white font-display">Pet Supplies</span>
-                <p className="text-text-secondary text-xs">High Growth Potential 2026</p>
-             </div>
-             <div className="col-span-4 bg-red-500/10 border-2 border-red-500/30 rounded-xl p-6 flex flex-col justify-end">
-                <span className="text-lg font-bold text-white font-display">Gadgets</span>
-                <p className="text-text-secondary text-xs">Saturated Market</p>
-             </div>
-           </div>
+        <div className="p-6 space-y-4">
+          {nicheCounts.map((n) => (
+            <div key={n.name} className="flex items-center gap-4">
+              <span className="w-40 shrink-0 text-sm text-white font-medium truncate">{n.name}</span>
+              <div className="flex-1 h-8 bg-background rounded-lg overflow-hidden border border-border/50">
+                <div
+                  className="h-full bg-gradient-to-r from-primary/70 to-primary rounded-lg transition-all duration-700"
+                  style={{ width: `${Math.max(6, (n.count / maxCount) * 100)}%` }}
+                ></div>
+              </div>
+              <span className="w-16 shrink-0 text-right text-xs font-bold text-text-secondary font-mono">
+                {n.count} · {n.pct}%
+              </span>
+            </div>
+          ))}
+          <p className="text-[10px] text-text-secondary/70 uppercase tracking-widest pt-2">{t.nicheDist}</p>
         </div>
       </div>
     </div>

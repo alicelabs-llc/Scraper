@@ -20,8 +20,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ lang }) => {
     if (!productInfo) return;
     setLoading(true);
     try {
-      const promptInfo = `${productInfo} (Language of result: ${lang})`;
-      const text = await generateProductDescription(promptInfo, tone, audience);
+      const text = await generateProductDescription(productInfo, tone, audience, lang);
       setResult(text || "Error");
     } catch (error) {
       setResult("Error connecting to AI.");

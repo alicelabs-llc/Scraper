@@ -25,7 +25,6 @@ const App: React.FC = () => {
   // Guardar cada cambio de userConfig en localStorage
   useEffect(() => {
     localStorage.setItem('prodintel_config', JSON.stringify(userConfig));
-    console.log("Config updated:", userConfig);
   }, [userConfig]);
 
   const handleAnalyzeProduct = (product: WinningProduct) => {
@@ -41,7 +40,7 @@ const App: React.FC = () => {
       case 'daily-hunt':
         return <DailyFinder lang={lang} onAnalyzeProduct={handleAnalyzeProduct} />;
       case 'analysis':
-        return <Analysis lang={lang} niche={selectedProduct?.niche || "E-commerce 2026"} />;
+        return <Analysis lang={lang} niche={selectedProduct?.niche || `E-commerce ${new Date().getFullYear()}`} />;
       case 'assistant':
         return <AIAssistant lang={lang} />;
       case 'details':

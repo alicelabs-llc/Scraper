@@ -17,7 +17,7 @@ Built by [AliceLabs LLC](https://alicelabs.site)
 
 ## What it does
 
-- **Winning product finder** — scans TikTok Shop, Amazon, and global marketplaces for trending products with high margins
+- **Winning product finder** — scans TikTok Shop, Amazon, and global marketplaces for trending products with high margins — grounded in live Google Search results with real source links
 - **Niche analysis** — scores niches by opportunity level (High Opportunity / Moderate / Saturated / Stable)
 - **Market trends dashboard** — visualizes revenue trends, growth rates, and seller competition
 - **AI assistant** — ask questions about any niche or product and get instant market intelligence
@@ -32,25 +32,23 @@ Built by [AliceLabs LLC](https://alicelabs.site)
 
 ## Quick start
 
-**Prerequisites:** Node.js 18+, Gemini API key
+**This app is BYOK (Bring Your Own Key)** — no server, no accounts, no cost:
+
+1. Get a **free Gemini API key** at [aistudio.google.com](https://aistudio.google.com/)
+2. Open ProdIntel → **Settings → AI Connection (BYOK)** → paste your key → **Test Connection**
+3. Your key is stored **only in your browser** (localStorage) and is sent **only to Google's API**. It is never bundled into the code, never committed to git, and never transmitted to AliceLabs servers.
 
 ```bash
 git clone https://github.com/alicelabs-llc/Scraper.git
 cd Scraper
 npm install
-```
-
-Create a `.env.local` file:
-
-```env
-API_KEY=your_gemini_api_key_here
-```
-
-Run locally:
-
-```bash
 npm run dev
 ```
+
+Open `http://localhost:3000`, add your key in Settings, and run your first Daily Hunt.
+
+> Developers only: you can optionally set `GEMINI_API_KEY` in a local `.env` file for dev convenience — but any key bundled by Vite `define` is visible in the build output, so prefer BYOK.
+
 
 ## Pages
 

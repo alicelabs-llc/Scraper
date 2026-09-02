@@ -66,6 +66,7 @@ const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, lang }) => 
   const [products, setProducts] = useState<WinningProduct[]>([]);
   const [loading, setLoading] = useState(false);
   const [scanStep, setScanStep] = useState(0);
+  const [error, setError] = useState<string | null>(null);
 
   const downloadCSV = () => {
     if (products.length === 0) return;
@@ -82,22 +83,26 @@ const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, lang }) => 
       `"${p.imageUrl || ''}"`
     ]);
 
-    const csvContent = "data:text/csv;charset=utf-8," 
-      + headers.join(",") + "\n" 
+    // BOM prefix so Excel opens accents/quotes correctly; Blob avoids encodeURI corruption
+    const csvContent = "\uFEFF"
+      + headers.join(",") + "\n"
       + rows.map(e => e.join(",")).join("\n");
 
-    const encodedUri = encodeURI(csvContent);
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
+    link.setAttribute("href", url);
     link.setAttribute("download", `ProdIntel_Data_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const fetchProducts = async () => {
     setLoading(true);
     setScanStep(0);
+    setError(null);
     
     const logInterval = setInterval(() => {
       setScanStep(prev => (prev < t.scanSteps.length - 1 ? prev + 1 : prev));
@@ -112,8 +117,13 @@ const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, lang }) => 
         date: new Date().toDateString(),
         items: validResults
       }));
-    } catch (error) {
-      console.error("Scraping failed", error);
+    } catch (err) {
+      console.error("Scanning failed", err);
+      setError(
+        (err as Error)?.name === 'MissingApiKeyError'
+          ? `${t.needApiKey} — ${t.needApiKeyDesc}`
+          : `${t.errorTitle}: ${String((err as Error)?.message || err).slice(0, 160)}`
+      );
     } finally {
       clearInterval(logInterval);
       setLoading(false);
@@ -177,6 +187,22 @@ const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, lang }) => 
         </div>
       </div>
 
+      {error && !loading && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center gap-4">
+          <span className="material-symbols-outlined text-red-500 text-3xl">error</span>
+          <div className="flex-1">
+            <p className="text-white font-bold text-sm">{t.errorTitle}</p>
+            <p className="text-text-secondary text-xs mt-1">{error}</p>
+          </div>
+          <button
+            onClick={fetchProducts}
+            className="px-5 py-2 bg-red-500/20 border border-red-500/40 hover:bg-red-500 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all"
+          >
+            {t.errorRetry}
+          </button>
+        </div>
+      )}
+
       {loading ? (
         <div className="bg-[#0d131d] border border-border rounded-2xl p-12 flex flex-col items-center justify-center min-h-[500px] text-center">
           <div className="size-20 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-8"></div>
@@ -192,6 +218,13 @@ const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, lang }) => 
         </div>
       ) : (
         <div className="space-y-12">
+          {products.length === 0 && !error && (
+            <div className="bg-surface border border-border rounded-2xl p-12 text-center">
+              <span className="material-symbols-outlined text-5xl text-text-secondary/40 mb-4 block">search_off</span>
+              <p className="text-white font-bold">{t.emptyDash}</p>
+              <p className="text-text-secondary text-sm mt-2">{t.emptyDashDesc}</p>
+            </div>
+          )}
           {/* Top Seller Highlight */}
           {products.length > 0 && (
             <div className="bg-gradient-to-r from-primary/20 to-transparent border border-primary/30 rounded-3xl p-8 flex flex-col lg:flex-row gap-8 items-center relative overflow-hidden group">
