@@ -4,10 +4,15 @@ import { WinningProduct, Language } from '../types';
 import { getDeepProductAnalysis } from '../services/geminiService';
 import { translations } from '../translations';
 import TrustBadge from '../components/TrustBadge';
+import { batchVerifySources, ServerVerdict } from '../services/reputationClient';
 
 interface ProductDetailsProps {
   product: WinningProduct | null;
   lang: Language;
+}
+
+function domainOf(url: string | undefined): string {
+  try { return url ? new URL(url).hostname.toLowerCase() : ''; } catch { return ''; }
 }
 
 const ProductDetails: React.FC<ProductDetailsProps> = ({ product, lang }) => {
@@ -16,6 +21,7 @@ const ProductDetails: React.FC<ProductDetailsProps> = ({ product, lang }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [imgError, setImgError] = useState(false);
+  const [serverVerdicts, setServerVerdicts] = useState<Record<string, ServerVerdict>>({});
 
   useEffect(() => {
     if (product) {
@@ -38,6 +44,15 @@ const ProductDetails: React.FC<ProductDetailsProps> = ({ product, lang }) => {
       fetchDeepAnalysis();
     }
   }, [product, lang]);
+
+  // Server-confirmed reputation for the analysis sources (fail-soft, cached).
+  useEffect(() => {
+    const urls = (analysis?.sources || []).map((s: any) => s?.uri).filter(Boolean);
+    const stop = batchVerifySources(urls, (v) =>
+      setServerVerdicts((prev) => ({ ...prev, [v.domain]: v }))
+    );
+    return stop;
+  }, [analysis]);
 
   if (!product) {
     return (
@@ -157,7 +172,7 @@ const ProductDetails: React.FC<ProductDetailsProps> = ({ product, lang }) => {
                        <a href={s.uri} target="_blank" rel="noopener noreferrer" className="px-3 py-2 bg-surface-light border border-border rounded-lg text-[10px] text-white hover:bg-primary hover:border-primary transition-all flex items-center gap-2 font-bold group flex-1 min-w-0">
                           <span className="material-symbols-outlined text-[14px] group-hover:animate-bounce">language</span> <span className="truncate">{s.title}</span>
                        </a>
-                       <TrustBadge url={s.uri} lang={lang} compact />
+                       <TrustBadge url={s.uri} lang={lang} compact server={serverVerdicts[domainOf(s.uri)]} />
                      </div>
                    )) || <div className="h-8 w-32 bg-background rounded animate-pulse"></div>}
                 </div>

@@ -5,6 +5,11 @@ import { WinningProduct, Language } from '../types';
 import { translations } from '../translations';
 import TrustBadge from '../components/TrustBadge';
 import { isWatched, toggleWatchlist, rememberScanNames, previousScanNames } from '../services/watchlist';
+import { batchVerifySources, ServerVerdict } from '../services/reputationClient';
+
+function domainOf(url: string | undefined): string {
+  try { return url ? new URL(url).hostname.toLowerCase() : ''; } catch { return ''; }
+}
 
 interface DailyFinderProps {
   onAnalyzeProduct?: (product: WinningProduct) => void;
@@ -75,6 +80,7 @@ const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, lang }) => 
   const [sortBy, setSortBy] = useState<'trend' | 'name'>('trend');
   // watchlist + new badges (tick forces re-render on toggle)
   const [watchTick, setWatchTick] = useState(0);
+  const [serverVerdicts, setServerVerdicts] = useState<Record<string, ServerVerdict>>({});
   const prevNames = useMemo(() => previousScanNames(lang), [lang]);
 
   const downloadCSV = () => {
@@ -162,6 +168,15 @@ const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, lang }) => 
     }
     fetchProducts();
   }, [lang]);
+
+  // Live UTA Reputation confirmation: after the local badges render, ask the
+  // /api/reputation endpoint for server verdicts (fail-soft, cached 24h).
+  useEffect(() => {
+    const stop = batchVerifySources(products.map((p) => p.sourceUrl), (v) =>
+      setServerVerdicts((prev) => ({ ...prev, [v.domain]: v }))
+    );
+    return stop;
+  }, [products]);
 
   const niches = useMemo(
     () => [...new Set(products.map((p) => p.niche).filter(Boolean))].sort(),
@@ -305,7 +320,7 @@ const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, lang }) => 
                 <div className="flex items-center gap-2 flex-wrap">
                    <span className="material-symbols-outlined text-emerald-500 fill-1">verified</span>
                    <span className="text-[11px] font-bold text-emerald-500 uppercase tracking-widest">{t.verified}</span>
-                   <TrustBadge url={products[0].sourceUrl} lang={lang} />
+                   <TrustBadge url={products[0].sourceUrl} lang={lang} server={serverVerdicts[domainOf(products[0].sourceUrl)]} />
                 </div>
                 <h3 className="text-3xl font-bold text-white font-display leading-tight">{products[0].name}</h3>
                 <p className="text-text-secondary leading-relaxed max-w-2xl italic">"{products[0].reasonWhyWinning}"</p>
@@ -408,7 +423,7 @@ const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, lang }) => 
                         <span className="text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded">Margen: {product.potentialMargin}</span>
                       </div>
                       <div className="flex items-center justify-between mb-4">
-                        <TrustBadge url={product.sourceUrl} lang={lang} />
+                        <TrustBadge url={product.sourceUrl} lang={lang} server={serverVerdicts[domainOf(product.sourceUrl)]} />
                         <span className="text-[9px] text-text-secondary/60 font-mono truncate max-w-[120px]">{product.sourceUrl ? new URL(product.sourceUrl).hostname : ''}</span>
                       </div>
                       <div className="flex flex-col gap-2">

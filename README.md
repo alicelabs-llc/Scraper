@@ -75,6 +75,39 @@ Open `http://localhost:3000`, add your key in Settings, and run your first Daily
 
 Built for dropshippers, Amazon FBA sellers, and TikTok Shop creators who need to identify winning products fast without manual research. Scraper automates the research process using live Google Search data grounded through Gemini.
 
+## Domain Reputation API (`/api/reputation`)
+
+Every source link shown in ProdIntel passes a **Source Safety Gate** before display: a deterministic domain-reputation engine (marketplace allowlist, shorteners, punycode, raw IPs, brand typosquats, low-barrier hosts, abused TLDs, redirect params). The same engine is exposed as a **free, public HTTP endpoint** so any app, bot, or AI agent can ask "can I trust this domain?" — no API key, no registration.
+
+```bash
+# Verdict for any URL or bare domain
+curl "https://<your-deploy>/api/reputation?domain=aliexpress.com"
+curl "https://<your-deploy>/api/reputation?url=https://bit.ly/x"
+
+# POST also works
+curl -X POST "https://<your-deploy>/api/reputation" \
+  -H "Content-Type: application/json" -d '{"url": "https://amaz0n-deals.net/shop"}'
+
+# Availability probe
+curl "https://<your-deploy>/api/reputation?probe=1"
+```
+
+Response (deterministic per `engine` version, CDN-cacheable 24h):
+
+```json
+{
+  "engine": "uta-reputation-v1.1",
+  "domain": "bit.ly",
+  "verdict": "risky",
+  "score": 8,
+  "reasons": ["URL shortener (destination hidden)"]
+}
+```
+
+Verdicts: `trusted` (95) · `unknown` (55) · `caution` (35) · `risky` (8), always with transparent reasons. The client runs the identical engine locally — badges render instantly offline, then get server-confirmed (the `UTA` chip) when the endpoint is reachable; on failure it degrades silently. Fail-closed semantics for *actions* (as opposed to display) are the caller's policy — see the spec in [`alicelabs-llc/universal-trust-adapter · api/reputation-spec.md`](https://github.com/alicelabs-llc/universal-trust-adapter/blob/main/api/reputation-spec.md).
+
+**Deploy:** the repo ships `vercel.json` + the Edge Function in `api/` — import it into Vercel (or `npx vercel --prod`) and the app + API go live in one deploy.
+
 ---
 
 © 2026 AliceLabs LLC · [alicelabs.site](https://alicelabs.site) · [contacto@alicelabs.site](mailto:contacto@alicelabs.site)

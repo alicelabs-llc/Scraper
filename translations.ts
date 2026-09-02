@@ -84,6 +84,7 @@ export const translations = {
     trustCaution: "Precaución",
     trustRisky: "Riesgosa",
     trustNoIssues: "Sin señales de riesgo (verificación local)",
+    utaReputation: "Reputación UTA",
     safetyPanelTitle: "Seguridad de fuentes (último escaneo)",
     scanHistoryTitle: "Historial de escaneos",
     assistant: {
@@ -181,6 +182,7 @@ export const translations = {
     trustCaution: "Caution",
     trustRisky: "Risky",
     trustNoIssues: "No red flags detected (local check)",
+    utaReputation: "UTA Reputation",
     safetyPanelTitle: "Source safety (last scan)",
     scanHistoryTitle: "Scan history",
     assistant: {
@@ -278,6 +280,7 @@ export const translations = {
     trustCaution: "Prudence",
     trustRisky: "Risquée",
     trustNoIssues: "Aucun signal à risque (vérification locale)",
+    utaReputation: "Réputation UTA",
     safetyPanelTitle: "Sécurité des sources (dernier scan)",
     scanHistoryTitle: "Historique des scans",
     assistant: {
@@ -375,6 +378,7 @@ export const translations = {
     trustCaution: "Vorsicht",
     trustRisky: "Riskant",
     trustNoIssues: "Keine Warnsignale erkannt (lokale Prüfung)",
+    utaReputation: "UTA-Reputation",
     safetyPanelTitle: "Quellensicherheit (letzter Scan)",
     scanHistoryTitle: "Scan-Verlauf",
     assistant: {
@@ -472,6 +476,7 @@ export const translations = {
     trustCaution: "注意",
     trustRisky: "有风险",
     trustNoIssues: "未发现风险信号（本地检查）",
+    utaReputation: "UTA 信誉",
     safetyPanelTitle: "来源安全性（最近一次扫描）",
     scanHistoryTitle: "扫描历史",
     assistant: {
