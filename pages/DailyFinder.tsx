@@ -4,7 +4,10 @@ import { huntWinningProducts } from '../services/geminiService';
 import { WinningProduct, Language } from '../types';
 import { translations } from '../translations';
 import TrustBadge from '../components/TrustBadge';
+import LiveSignals from '../components/LiveSignals';
 import { isWatched, toggleWatchlist, rememberScanNames, previousScanNames } from '../services/watchlist';
+import { isCompared, toggleCompare } from '../services/compare';
+import { safeExternalUrl } from '../services/security';
 import { batchVerifySources, ServerVerdict } from '../services/reputationClient';
 
 function domainOf(url: string | undefined): string {
@@ -221,6 +224,23 @@ const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, lang }) => 
     );
   };
 
+  const CompareButton: React.FC<{ product: WinningProduct; className?: string }> = ({ product, className = '' }) => {
+    const active = isCompared(product.name);
+    return (
+      <button
+        onClick={(e) => { e.stopPropagation(); toggleCompare(product); setWatchTick((n) => n + 1); }}
+        title={active ? t.compareRemove : t.compareAdd}
+        className={`shrink-0 p-1.5 rounded-lg border backdrop-blur transition-all ${
+          active
+            ? 'bg-amber-500/90 border-amber-500 text-white shadow-lg'
+            : 'bg-background/70 border-border text-text-secondary hover:text-white hover:border-amber-500/50'
+        } ${className}`}
+      >
+        <span className="material-symbols-outlined text-[16px]">{active ? 'compare_arrows' : 'balance'}</span>
+      </button>
+    );
+  };
+
   return (
     <div className="p-8 space-y-8 max-w-[1600px] mx-auto animate-in fade-in duration-700">
       <div className="flex flex-col xl:flex-row items-stretch gap-6">
@@ -266,6 +286,8 @@ const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, lang }) => 
         </div>
       </div>
 
+      <LiveSignals lang={lang} limit={6} />
+
       {error && !loading && (
         <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center gap-4">
           <span className="material-symbols-outlined text-red-500 text-3xl">error</span>
@@ -310,7 +332,8 @@ const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, lang }) => 
               <div className="absolute top-4 left-4 px-4 py-1.5 bg-primary text-white font-black text-xs uppercase tracking-[0.2em] rounded-full z-20 shadow-xl">
                 {t.topSeller} #1
               </div>
-              <div className="absolute top-4 right-4 z-20">
+              <div className="absolute top-4 right-4 z-20 flex gap-2">
+                <CompareButton product={products[0]} />
                 <HeartButton product={products[0]} />
               </div>
               <div className="w-full lg:w-1/3 aspect-square max-w-[300px] bg-white rounded-2xl overflow-hidden shadow-2xl relative shrink-0">
@@ -404,10 +427,13 @@ const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, lang }) => 
                           </div>
                         )}
                       </div>
-                      <div className="absolute top-3 right-3 px-2 py-1 bg-emerald-500/90 text-white rounded text-[10px] font-black z-10 shadow-lg">
-                        {product.trendScore}%
+                      <div className="absolute top-3 right-3 flex gap-1.5 z-10">
+                        <div className="px-2 py-1 bg-emerald-500/90 text-white rounded text-[10px] font-black shadow-lg">
+                          {product.trendScore}%
+                        </div>
                       </div>
-                      <div className="absolute bottom-3 right-3 z-10">
+                      <div className="absolute bottom-3 right-3 z-10 flex gap-1.5">
+                        <CompareButton product={product} />
                         <HeartButton product={product} key={watchTick} />
                       </div>
                     </div>
@@ -436,9 +462,9 @@ const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, lang }) => 
                         <div className="grid grid-cols-2 gap-2">
                           {product.sourceUrl && product.sourceUrl.startsWith('http') ? (
                               <a
-                                href={product.sourceUrl}
+                                href={safeExternalUrl(product.sourceUrl) || undefined}
                                 target="_blank"
-                                rel="noopener noreferrer"
+                                rel="noopener noreferrer nofollow"
                                 className="py-2 bg-surface border border-border hover:bg-surface-light text-text-secondary hover:text-white text-[10px] font-black uppercase rounded-lg transition-all flex items-center justify-center gap-1 truncate px-1"
                               >
                                 <span className="material-symbols-outlined text-sm">link</span> URL

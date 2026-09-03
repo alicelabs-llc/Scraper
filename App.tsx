@@ -7,6 +7,7 @@ import Analysis from './pages/Analysis';
 import AIAssistant from './pages/AIAssistant';
 import ProductDetails from './pages/ProductDetails';
 import Watchlist from './pages/Watchlist';
+import Compare from './pages/Compare';
 import Settings from './pages/Settings';
 import { WinningProduct, UserConfig } from './types';
 
@@ -44,6 +45,8 @@ const App: React.FC = () => {
         return <Analysis lang={lang} niche={selectedProduct?.niche || `E-commerce ${new Date().getFullYear()}`} />;
       case 'watchlist':
         return <Watchlist lang={lang} onAnalyzeProduct={handleAnalyzeProduct} />;
+      case 'compare':
+        return <Compare lang={lang} onAnalyzeProduct={handleAnalyzeProduct} />;
       case 'assistant':
         return <AIAssistant lang={lang} />;
       case 'details':

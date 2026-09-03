@@ -16,6 +16,7 @@ export const NAV_ITEMS = [
   { id: 'daily-hunt', label: 'Daily Hunt', icon: 'travel_explore' },
   { id: 'analysis', label: 'Market Analysis', icon: 'analytics' },
   { id: 'watchlist', label: 'Watchlist', icon: 'bookmarks' },
+  { id: 'compare', label: 'Compare', icon: 'compare_arrows' },
   { id: 'assistant', label: 'AI Assistant', icon: 'smart_toy' },
   { id: 'details', label: 'Product Details', icon: 'inventory_2' },
   { id: 'settings', label: 'Settings', icon: 'settings' },

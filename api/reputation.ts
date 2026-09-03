@@ -27,19 +27,45 @@ export const config = { runtime: 'edge' };
 
 const SPEC_URL = 'https://github.com/alicelabs-llc/universal-trust-adapter/blob/main/api/reputation-spec.md';
 
+// ----- anti-abuse: per-IP token bucket (per-isolate, light but real) -----
+const WINDOW_MS = 60_000;
+const MAX_REQ = 60;
+const buckets = new Map<string, { count: number; reset: number }>();
+
+function rateLimited(ip: string): boolean {
+  const now = Date.now();
+  const b = buckets.get(ip);
+  if (!b || now > b.reset) {
+    buckets.set(ip, { count: 1, reset: now + WINDOW_MS });
+    if (buckets.size > 5000) buckets.clear(); // hard memory cap
+    return false;
+  }
+  b.count += 1;
+  return b.count > MAX_REQ;
+}
+
+function clientIp(req: Request): string {
+  return (
+    req.headers.get('x-real-ip') ||
+    req.headers.get('cf-connecting-ip') ||
+    (req.headers.get('x-forwarded-for') || '').split(',')[0].trim() ||
+    'unknown'
+  );
+}
+
 const CORS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
-function json(body: unknown, status = 200): Response {
+function json(body: unknown, status = 200, cacheSeconds = 86400): Response {
   return new Response(JSON.stringify(body, null, 2), {
     status,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
       // Deterministic per input per engine version -> CDN-cacheable for a day.
-      'Cache-Control': 'public, s-maxage=86400, stale-while-revalidate=604800',
+      'Cache-Control': `public, s-maxage=${cacheSeconds}, stale-while-revalidate=604800`,
       ...CORS,
     },
   });
@@ -53,6 +79,10 @@ export default async function handler(req: Request): Promise<Response> {
     return json({ error: 'method not allowed', engine: REPUTATION_ENGINE_VERSION }, 405);
   }
 
+  if (rateLimited(clientIp(req))) {
+    return json({ error: 'rate limited', engine: REPUTATION_ENGINE_VERSION }, 429, 10);
+  }
+
   const requestUrl = new URL(req.url);
 
   // Availability probe (used by clients to enable server-verified badges).
@@ -63,8 +93,17 @@ export default async function handler(req: Request): Promise<Response> {
   // Input: query param (GET) or JSON body (POST, wins).
   let input = requestUrl.searchParams.get('url') || requestUrl.searchParams.get('domain') || '';
   if (req.method === 'POST') {
+    let bodyText = '';
     try {
-      const body = await req.json();
+      bodyText = await req.text();
+    } catch {
+      return json({ error: 'invalid body', engine: REPUTATION_ENGINE_VERSION }, 400);
+    }
+    if (bodyText.length > 4096) {
+      return json({ error: 'body too large', engine: REPUTATION_ENGINE_VERSION }, 413);
+    }
+    try {
+      const body = JSON.parse(bodyText);
       if (body && typeof body === 'object') {
         const b = body as Record<string, unknown>;
         input = (typeof b.url === 'string' && b.url) || (typeof b.domain === 'string' && b.domain) || input;

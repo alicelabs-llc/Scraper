@@ -1,29 +1,47 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
-import { Language } from "../types";
-
 /**
- * ProdIntel AI service — v2 (BYOK, live dates, real grounding sources).
+ * ProdIntel AI service — v5 "Universal Provider" edition.
+ *
+ * ANY API key works (BYOK): Gemini, OpenAI, Claude, Groq, OpenRouter,
+ * DeepSeek, Mistral, xAI, Cerebras, Fireworks, Together, Z.ai or any
+ * OpenAI-compatible endpoint. Detection lives in services/ai/*.
+ *
+ * v5 additions:
+ *  - Every prompt is enriched with LIVE free-source signals (Reddit / HN /
+ *    Google Trends — see services/dataSources.ts), so non-grounding models
+ *    can still cite REAL, just-scraped URLs.
+ *  - Google Search grounding stays available on Gemini (used when present).
+ *  - Local rate limiting on expensive actions (anti-abuse).
  *
  * Key resolution (BYOK first, env as dev fallback):
- *   1. localStorage 'prodintel_api_key' (user's own key — never bundled, never sent anywhere except Google)
+ *   1. localStorage 'prodintel_api_key' (user's own key)
  *   2. process.env.API_KEY (only for local development via vite define)
- *
- * Model: stable aliases by default ('gemini-flash-latest' / 'gemini-pro-latest'),
- * overridable via localStorage 'prodintel_model' so previews retiring never break the app.
  */
 
-export class MissingApiKeyError extends Error {
-  constructor() {
-    super("MISSING_API_KEY");
-    this.name = "MissingApiKeyError";
-  }
-}
+import { Language } from "../types";
+import {
+  aiGenerate, resolveAi, testConnectionFast,
+  getStoredModel, setStoredModel, providerSummary,
+} from "./ai/client";
+import { MissingApiKeyError, GroundingSource, WinningProductRaw } from "./ai/types";
+import { getLiveSignals, signalsToPromptContext } from "./dataSources";
+import { rateLimitLocal } from "./security";
 
-export interface GroundingSource {
-  title: string;
-  uri: string;
-}
+// ---- re-exports (public API compat) ----
+export { MissingApiKeyError } from "./ai/types";
+export type { GroundingSource, WinningProductRaw } from "./ai/types";
+export { getApiKey, setApiKey } from "./ai/client";
+export { providerSummary, invalidateDetection } from "./ai/client";
+
+// Legacy model helpers — kept so older imports keep working.
+export const getModel = (quality = false): string => {
+  const stored = getStoredModel();
+  if (stored) return stored;
+  return quality ? "gemini-pro-latest" : "gemini-flash-latest";
+};
+export const setModel = (model: string) => setStoredModel(model);
+
+// ---------- prompt helpers ----------
 
 const LANG_NAMES: Record<Language, string> = {
   es: "Spanish (Español)",
@@ -33,50 +51,6 @@ const LANG_NAMES: Record<Language, string> = {
   zh: "Simplified Chinese (简体中文)",
 };
 
-const API_KEY_STORAGE = "prodintel_api_key";
-const MODEL_STORAGE = "prodintel_model";
-
-export const getApiKey = (): string | null => {
-  try {
-    const stored = localStorage.getItem(API_KEY_STORAGE);
-    if (stored && stored.trim().length > 10) return stored.trim();
-  } catch {
-    /* localStorage unavailable — fall through to env */
-  }
-  const envKey = (process.env.API_KEY || "").trim();
-  return envKey && !envKey.startsWith("your_") ? envKey : null;
-};
-
-export const setApiKey = (key: string) => {
-  const trimmed = key.trim();
-  if (!trimmed) {
-    localStorage.removeItem(API_KEY_STORAGE);
-  } else {
-    localStorage.setItem(API_KEY_STORAGE, trimmed);
-  }
-};
-
-export const getModel = (quality = false): string => {
-  try {
-    const m = localStorage.getItem(MODEL_STORAGE);
-    if (m) return m;
-  } catch { /* ignore */ }
-  return quality ? "gemini-pro-latest" : "gemini-flash-latest";
-};
-
-export const setModel = (model: string) => localStorage.setItem(MODEL_STORAGE, model);
-
-// Singleton client — one instance per resolved key instead of one per call.
-let cachedClient: { key: string; client: GoogleGenAI } | null = null;
-const getClient = (): GoogleGenAI => {
-  const apiKey = getApiKey();
-  if (!apiKey) throw new MissingApiKeyError();
-  if (!cachedClient || cachedClient.key !== apiKey) {
-    cachedClient = { key: apiKey, client: new GoogleGenAI({ apiKey }) };
-  }
-  return cachedClient.client;
-};
-
 // Dynamic date — prompts always anchored to TODAY, never a stale hardcoded month.
 const dateContext = () =>
   new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
@@ -84,6 +58,8 @@ const dateContext = () =>
 // Every AI answer respects the UI language selected by the user.
 const langDirective = (lang: Language) =>
   `\n\nRESPONSE LANGUAGE (MANDATORY): write ALL text fields in ${LANG_NAMES[lang]}.`;
+
+// ---------- JSON safety ----------
 
 const cleanJson = (text: string) =>
   text.replace(/```json/g, "").replace(/```/g, "").trim();
@@ -104,12 +80,26 @@ const parseJsonSafe = <T,>(text: string, fallback: T): T => {
   }
 };
 
+/** Some providers force JSON objects; unwrap {"products": [...]} envelopes. */
+const unwrapArray = <T,>(data: unknown, key: string): T[] => {
+  if (Array.isArray(data)) return data as T[];
+  if (data && typeof data === "object") {
+    const inner = (data as any)[key];
+    if (Array.isArray(inner)) return inner as T[];
+  }
+  return [];
+};
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const isFatal = (err: unknown): boolean => {
   const msg = String((err as Error)?.message || err || "");
   return (
     msg.includes("MISSING_API_KEY") ||
+    msg.includes("KEY_REJECTED") ||
+    msg.includes("KEY_FORMAT") ||
+    msg.includes("NO_PROVIDER") ||
+    msg.includes("CUSTOM_NO_") ||
     msg.includes("API key not valid") ||
     msg.includes("permission") ||
     msg.includes("401") ||
@@ -132,102 +122,93 @@ const withRetry = async <T,>(fn: () => Promise<T>, attempts = 3): Promise<T> => 
   throw lastErr;
 };
 
-// REAL sources from the Google Search tool — groundingChunks carries the URLs
-// the search actually used, instead of asking the model to "please not invent links".
-const extractGrounding = (response: unknown): GroundingSource[] => {
+/**
+ * Live free-source context, fetched once per scan (30-min cache inside).
+ * Fail-soft: empty string when every source is unreachable.
+ */
+const liveContext = async (max = 18): Promise<string> => {
   try {
-    const chunks =
-      (response as any)?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-    const seen = new Set<string>();
-    const out: GroundingSource[] = [];
-    for (const c of chunks) {
-      const web = c?.web;
-      if (web?.uri && !seen.has(web.uri)) {
-        seen.add(web.uri);
-        out.push({ title: web.title || web.uri, uri: web.uri });
-      }
-    }
-    return out;
+    const signals = await getLiveSignals();
+    if (!signals.length) return "";
+    return `\n\nLIVE MARKET SIGNALS (scraped minutes ago from free public sources — Reddit, Hacker News, Google Trends).
+These are REAL URLs you may cite as sourceUrl/sourceTitle when they genuinely relate to a product. Never invent other URLs:\n${signalsToPromptContext(signals, max)}`;
   } catch {
-    return [];
+    return "";
   }
 };
 
-export interface WinningProductRaw {
-  name: string;
-  niche: string;
-  priceEstimate: string;
-  reasonWhyWinning: string;
-  potentialMargin: string;
-  trendScore: number;
-  imageUrl: string;
-  sourceUrl: string;
-  sourceTitle: string;
-}
+/** Attach a REAL signal URL to products that came back without a source. */
+const attachSignalSources = (products: WinningProductRaw[], signals: Awaited<ReturnType<typeof getLiveSignals>>) => {
+  if (!signals.length) return;
+  const unused = [...signals];
+  const wordsOf = (s: string) =>
+    s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3);
+  for (const p of products) {
+    const ok = typeof p.sourceUrl === "string" && p.sourceUrl.startsWith("http");
+    if (ok || !p.name) continue;
+    const pw = new Set(wordsOf(p.name));
+    const match =
+      unused.find((s) => wordsOf(s.title).some((w) => pw.has(w))) || unused.shift();
+    if (match) {
+      p.sourceUrl = match.url;
+      p.sourceTitle = p.sourceTitle || match.title;
+      const idx = unused.indexOf(match);
+      if (idx >= 0) unused.splice(idx, 1);
+    }
+  }
+};
+
+// ---------- public AI functions (signatures unchanged) ----------
 
 export const huntWinningProducts = async (
   lang: Language = "es"
 ): Promise<WinningProductRaw[]> => {
+  // Anti-abuse: hard local cap on expensive scans (user's own key pays).
+  if (!rateLimitLocal("scan", 10, 10 * 60_000)) {
+    throw new Error("RATE_LIMITED: too many scans in 10 minutes — wait a bit.");
+  }
+
+  const signals = await getLiveSignals();
   const run = async () => {
-    const ai = getClient();
-    const response = await ai.models.generateContent({
-      model: getModel(),
-      contents: `[LIVE MARKET RESEARCH — today is ${dateContext()}]
-Use Google Search to identify the 30 products with the highest sales momentum THIS WEEK on TikTok Shop, Amazon and global marketplaces.
+    const response = await aiGenerate({
+      prompt: `[LIVE MARKET RESEARCH — today is ${dateContext()}]
+Identify the 30 products with the highest sales momentum THIS WEEK on TikTok Shop, Amazon and global marketplaces.
 
 RULES (CRITICAL):
-1. sourceUrl: ONLY a URL that appeared in your search results. Never fabricate URLs.
-2. imageUrl: ONLY a direct public image URL (.jpg/.png/.webp) seen in results; otherwise use exactly "placeholder".
+1. sourceUrl: ONLY a real URL — from your own knowledge of live marketplace pages, or from the LIVE MARKET SIGNALS list below. Never fabricate URLs.
+2. imageUrl: ONLY a direct public image URL (.jpg/.png/.webp); otherwise use exactly "placeholder".
 3. Product names must be specific (Brand + Model).
 4. trendScore: 0-100 based on current momentum signals (sales rank, social buzz, search volume).
-5. Fill every field; if unknown, use "" instead of guessing.${langDirective(lang)}`,
-      config: {
-        tools: [{ googleSearch: {} }],
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              name: { type: Type.STRING },
-              niche: { type: Type.STRING },
-              priceEstimate: { type: Type.STRING },
-              reasonWhyWinning: { type: Type.STRING },
-              potentialMargin: { type: Type.STRING },
-              trendScore: { type: Type.NUMBER },
-              imageUrl: { type: Type.STRING },
-              sourceUrl: { type: Type.STRING },
-              sourceTitle: { type: Type.STRING },
-            },
-            required: [
-              "name", "niche", "priceEstimate", "reasonWhyWinning",
-              "potentialMargin", "trendScore", "imageUrl", "sourceUrl", "sourceTitle",
-            ],
-          },
-        },
-      },
+5. Fill every field; if unknown, use "" instead of guessing.
+6. Return STRICT JSON: {"products": [ ... ]} with each item containing keys: name, niche, priceEstimate, reasonWhyWinning, potentialMargin, trendScore (number), imageUrl, sourceUrl, sourceTitle.${langDirective(lang)}${await liveContext(18)}`,
+      json: true,
+      grounding: true,
+      maxTokens: 8192,
+      timeoutMs: 120_000,
     });
 
-    const sources = extractGrounding(response);
-    const products = parseJsonSafe<WinningProductRaw[]>(response.text || "[]", []);
+    const parsed = parseJsonSafe<any>(response.text || "{}", {});
+    const products = unwrapArray<WinningProductRaw>(parsed, "products");
 
-    // Merge REAL grounding URLs into products that came back without a source.
-    const unused = [...sources];
+    // Merge REAL grounding URLs (Gemini) into products without a source.
+    const unusedSources = [...response.sources];
     for (const p of products) {
       const urlOk = typeof p.sourceUrl === "string" && p.sourceUrl.startsWith("http");
       if (!urlOk) {
         const match =
-          unused.find((s) => p.name && s.title && p.name.toLowerCase().split(" ").some(w => w.length > 3 && s.title.toLowerCase().includes(w))) ||
-          unused.shift();
+          unusedSources.find((s) => p.name && s.title && p.name.toLowerCase().split(" ").some(w => w.length > 3 && s.title.toLowerCase().includes(w))) ||
+          unusedSources.shift();
         if (match) {
           p.sourceUrl = match.uri;
           p.sourceTitle = p.sourceTitle || match.title;
-          unused.splice(unused.indexOf(match), 1);
+          unusedSources.splice(unusedSources.indexOf(match), 1);
         }
       }
       if (typeof p.trendScore !== "number" || Number.isNaN(p.trendScore)) p.trendScore = 0;
       p.trendScore = Math.max(0, Math.min(100, Math.round(p.trendScore)));
     }
+    // Free-source fallback: real scraped URLs for the remaining sourceless items.
+    attachSignalSources(products, signals);
     return products;
   };
   return withRetry(run);
@@ -235,39 +216,22 @@ RULES (CRITICAL):
 
 export const getDeepProductAnalysis = async (productName: string, lang: Language = "es") => {
   const run = async () => {
-    const ai = getClient();
-    const response = await ai.models.generateContent({
-      model: getModel(),
-      contents: `[COMPETITIVE ANALYSIS — today is ${dateContext()}]
+    const response = await aiGenerate({
+      prompt: `[COMPETITIVE ANALYSIS — today is ${dateContext()}]
 Research the product: "${productName}".
-Use Google Search and return: real competitors, customer sentiment summary, top market risks, and sources.
-'sources' must ONLY contain URLs from your search results (never invented).${langDirective(lang)}`,
-      config: {
-        tools: [{ googleSearch: {} }],
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            competitors: { type: Type.ARRAY, items: { type: Type.STRING } },
-            customerSentiment: { type: Type.STRING },
-            topRisks: { type: Type.ARRAY, items: { type: Type.STRING } },
-            sources: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: { title: { type: Type.STRING }, uri: { type: Type.STRING } },
-              },
-            },
-          },
-          required: ["competitors", "customerSentiment", "topRisks", "sources"],
-        },
-      },
+Return: real competitors, customer sentiment summary, top market risks, and sources.
+'sources' must ONLY contain real URLs (from the LIVE MARKET SIGNALS list when relevant, or well-known marketplace/review pages you are certain exist). Return STRICT JSON object with keys: competitors (array of strings), customerSentiment (string), topRisks (array of strings), sources (array of {title, uri}).${langDirective(lang)}${await liveContext(12)}`,
+      json: true,
+      grounding: true,
+      maxTokens: 4096,
+      timeoutMs: 90_000,
     });
 
     const data = parseJsonSafe<any>(response.text || "{}", {});
     if (!Array.isArray(data.sources) || data.sources.length === 0) {
-      const sources = extractGrounding(response);
-      if (sources.length) data.sources = sources.map((s) => ({ title: s.title, uri: s.uri }));
+      if (response.sources.length) {
+        data.sources = response.sources.map((s) => ({ title: s.title, uri: s.uri }));
+      }
     }
     return data;
   };
@@ -276,32 +240,12 @@ Use Google Search and return: real competitors, customer sentiment summary, top 
 
 export const analyzeNicheMarket = async (niche: string, lang: Language = "es") => {
   const run = async () => {
-    const ai = getClient();
-    const response = await ai.models.generateContent({
-      model: getModel(),
-      contents: `Analyze the current competitive structure of the "${niche}" niche (today: ${dateContext()}) using Google Search: leading brands with approximate market share, a Gini concentration index (0-1), and one actionable insight.${langDirective(lang)}`,
-      config: {
-        tools: [{ googleSearch: {} }],
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            brands: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  name: { type: Type.STRING },
-                  sharePercent: { type: Type.NUMBER },
-                },
-              },
-            },
-            giniIndex: { type: Type.NUMBER },
-            insight: { type: Type.STRING },
-          },
-          required: ["brands", "giniIndex", "insight"],
-        },
-      },
+    const response = await aiGenerate({
+      prompt: `Analyze the current competitive structure of the "${niche}" niche (today: ${dateContext()}): leading brands with approximate market share, a Gini concentration index (0-1), and one actionable insight. Use the LIVE MARKET SIGNALS when relevant. Return STRICT JSON object with keys: brands (array of {name, sharePercent}), giniIndex (number), insight (string).${langDirective(lang)}${await liveContext(12)}`,
+      json: true,
+      grounding: true,
+      maxTokens: 4096,
+      timeoutMs: 90_000,
     });
     return parseJsonSafe<any>(response.text || "{}", {});
   };
@@ -310,11 +254,11 @@ export const analyzeNicheMarket = async (niche: string, lang: Language = "es") =
 
 export const analyzeMarketTrends = async (query: string, lang: Language = "es") => {
   const run = async () => {
-    const ai = getClient();
-    const response = await ai.models.generateContent({
-      model: getModel(),
-      contents: `Executive summary (max 120 words) based on THIS WEEK's news (today: ${dateContext()}) for: "${query}". Cite outlet names inline where possible.${langDirective(lang)}`,
-      config: { tools: [{ googleSearch: {} }] },
+    const response = await aiGenerate({
+      prompt: `Executive summary (max 120 words) based on THIS WEEK's real market signals (today: ${dateContext()}) for: "${query}". Reference concrete items from the LIVE MARKET SIGNALS where relevant; cite outlet names inline where possible.${langDirective(lang)}${await liveContext(14)}`,
+      maxTokens: 1200,
+      grounding: true,
+      timeoutMs: 60_000,
     });
     return response.text || "";
   };
@@ -328,27 +272,68 @@ export const generateProductDescription = async (
   lang: Language = "es"
 ) => {
   const run = async () => {
-    const ai = getClient();
-    const response = await ai.models.generateContent({
-      model: getModel(true),
-      contents: `Write conversion-focused sales copy for: ${productInfo}. Tone: ${tone}. Target audience: ${audience}. Include a short headline, a 3-bullet benefits list and a closing call to action.${langDirective(lang)}`,
+    const response = await aiGenerate({
+      prompt: `Write conversion-focused sales copy for: ${productInfo}. Tone: ${tone}. Target audience: ${audience}. Include a short headline, a 3-bullet benefits list and a closing call to action.${langDirective(lang)}`,
+      maxTokens: 2048,
+      timeoutMs: 60_000,
     });
     return response.text || "";
   };
   return withRetry(run);
 };
 
-// Quick connectivity test used by Settings — cheap (5 output tokens), no tools.
+// Quick connectivity test used by Settings — resolves provider (with probe)
+// and sends a 5-token ping. Locally rate-limited to stop brute-force spam.
 export const testConnection = async (): Promise<{ ok: boolean; detail: string }> => {
-  try {
-    const ai = getClient();
-    const response = await ai.models.generateContent({
-      model: getModel(),
-      contents: "ping",
-      config: { maxOutputTokens: 5 },
-    });
-    return { ok: true, detail: response.text?.trim() || "ok" };
-  } catch (err) {
-    return { ok: false, detail: String((err as Error)?.message || err) };
+  if (!rateLimitLocal("conn_test", 12, 60_000)) {
+    return { ok: false, detail: "RATE_LIMITED: too many tests per minute." };
   }
+  try {
+    const fast = await testConnectionFast();
+    if (fast.ok && fast.provider) {
+      return { ok: true, detail: `${fast.provider} · ${fast.model}` };
+    }
+    if (fast.ok) {
+      const { provider, model } = await resolveAi({ allowProbe: false });
+      return { ok: true, detail: `${provider.name} · ${model}` };
+    }
+    return fast;
+  } catch (err) {
+    const msg = String((err as Error)?.message || err);
+    return { ok: false, detail: msg };
+  }
+};
+
+/** Which provider is currently active (for UI badges, no network). */
+export const currentProviderInfo = () => providerSummary();
+
+/** Side-by-side verdict for the Compare page (2-3 products). */
+export const compareProducts = async (
+  products: { name: string; niche: string; priceEstimate: string; potentialMargin: string; trendScore: number }[],
+  lang: Language = "es"
+): Promise<string> => {
+  if (!rateLimitLocal("compare", 20, 10 * 60_000)) {
+    throw new Error("RATE_LIMITED: too many comparisons in 10 minutes — wait a bit.");
+  }
+  const run = async () => {
+    const lines = products
+      .map((p, i) => `${i + 1}. ${p.name} | niche: ${p.niche} | price: ${p.priceEstimate} | margin: ${p.potentialMargin} | trendScore: ${p.trendScore}/100`)
+      .join("\n");
+    const response = await aiGenerate({
+      prompt: `[PRODUCT COMPARISON — today is ${dateContext()}]
+Compare these products for a dropshipper deciding what to sell THIS WEEK:
+
+${lines}
+
+Deliver, in this order:
+1. One-line verdict naming the WINNER.
+2. Three bullets: best margin logic, best trend momentum, biggest risk.
+3. Final recommendation sentence (start/skip/watch).${langDirective(lang)}`,
+      maxTokens: 1500,
+      grounding: true,
+      timeoutMs: 60_000,
+    });
+    return response.text || "";
+  };
+  return withRetry(run);
 };

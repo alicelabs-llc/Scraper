@@ -1,13 +1,14 @@
 <div align="center">
 
-# Scraper
-**AI-powered product research tool for ecommerce sellers**
+# ProdIntel
+**AI product intelligence for ecommerce sellers — ANY AI provider, free live signals, UTA trust gate**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-238636?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/License-Alicelabs_(MIT)-238636?style=flat-square)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict-3178C6?style=flat-square&logo=typescript)](https://www.typescriptlang.org/)
-[![Gemini](https://img.shields.io/badge/Powered%20by-Gemini-4285F4?style=flat-square&logo=google)](https://ai.google.dev/)
+[![AI Providers](https://img.shields.io/badge/AI-Any_provider-8B5CF6?style=flat-square)]()
+[![Live](https://img.shields.io/badge/Live-prodintel--two.vercel.app-135bec?style=flat-square)](https://prodintel-two.vercel.app)
 
-Find winning products before your competitors do. Scraper uses Gemini + Google Search to surface trending products across TikTok Shop, Amazon, and global marketplaces in real time.
+Find winning products before your competitors do. ProdIntel works with **any AI API key** (Gemini, OpenAI, Claude, Groq, OpenRouter, DeepSeek, Mistral, xAI, Cerebras, Fireworks, Together, Z.ai — or any OpenAI-compatible endpoint), scrapes **free public market signals** (Reddit · Hacker News · Google Trends), and gates every source link through the **UTA reputation engine**.
 
 Built by [AliceLabs LLC](https://alicelabs.site)
 
@@ -17,18 +18,24 @@ Built by [AliceLabs LLC](https://alicelabs.site)
 
 ## What it does
 
-- **Winning product finder** — scans TikTok Shop, Amazon, and global marketplaces for trending products with high margins, grounded in live Google Search with real source links
-- **Source Safety Gate** — every source link is assessed BEFORE you click it (known marketplaces, URL shorteners, punycode/homoglyphs, raw IPs, redirect params, http) with a visible badge and reasons
+- **Universal BYOK (v5)** — paste ANY API key: ProdIntel detects the provider from its prefix (and probes official `/models` endpoints for ambiguous keys) and starts working immediately. Custom OpenAI-compatible endpoints supported (Ollama, LM Studio, vLLM, LiteLLM, gateways)
+- **Free live market signals (v5)** — Reddit (r/dropship, r/ecommerce, r/Entrepreneur, r/BusinessIdeas, r/sidehustle), Hacker News (Algolia) and Google Trends (server-side via `/api/signals`) are scraped keylessly and fed into every AI prompt, so even non-grounding models cite REAL, just-scraped URLs
+- **Compare (v5)** — select up to 3 products, see price/margin/trend/trust side-by-side and get an AI verdict
+- **Winning product finder** — scans TikTok Shop, Amazon, and global marketplaces for trending products with high margins, grounded in live search with real source links
+- **Source Safety Gate (UTA)** — every source link is assessed BEFORE you click it (known marketplaces, URL shorteners, punycode/homoglyphs, raw IPs, redirect params, http) with a visible badge, plus server-confirmed badges from the live reputation endpoint
 - **Watchlist** — save products and track them across daily scans; CSV export included
 - **Search, niche filter & sorting** — slice a 30-product scan in seconds; genuinely NEW findings vs. your previous scan are flagged
 - **Honest dashboard** — every metric (products found, avg trend score, dominant niche, scan history, source safety breakdown) is computed from YOUR real scan data. No invented numbers.
 - **Niche analysis** — scores niches by opportunity level with market concentration (Gini index)
-- **AI assistant** — ask questions about any niche or product and get instant market intelligence
+- **AI assistant** — conversion copy for any product in seconds
 - **Multi-language** — English, Spanish, French, German, Chinese (UI + AI responses)
 
-## Trust & privacy
+## Trust & privacy (anti-hacking)
 
-- **BYOK** — your Gemini key lives only in your browser's localStorage; it is never bundled, committed, or sent to any server other than Google's API
+- **Universal BYOK** — your key lives only in your browser's localStorage; it is never bundled, committed, or sent anywhere except the official HTTPS endpoint of the detected provider. Alicelabs servers never see a key
+- **Key hygiene** — keys are sanitized (control/zero-width chars stripped), charset-validated and masked for display before any use
+- **Local rate limits** — scans, connection tests and AI comparisons are rate-limited client-side (no runaway spend)
+- **Server hardening** — CSP, HSTS, X-Frame-Options DENY, nosniff, strict referrer policy and permissions policy on every route; both public API endpoints (`/api/reputation`, `/api/signals`) are per-IP rate limited, size-capped and fetch ONLY internal allowlisted sources
 - **Source Safety Gate** runs 100% locally and deterministically — it never claims a "verified" status it cannot back
 - Built by [AliceLabs LLC](https://alicelabs.site) — the UTA/Sentinel trust ecosystem
 
@@ -37,16 +44,17 @@ Built by [AliceLabs LLC](https://alicelabs.site)
 
 - React + TypeScript
 - Vite
-- Google Gemini API (with Google Search grounding)
+- Universal AI provider layer (Gemini, OpenAI, Anthropic, Groq, OpenRouter, DeepSeek, Mistral, xAI, Cerebras, Fireworks, Together, Z.ai, custom endpoints)
+- Free-signal scrapers (Reddit · Hacker News · Google Trends) + `/api/signals` edge function
 - Tailwind CSS
 
 ## Quick start
 
 **This app is BYOK (Bring Your Own Key)** — no server, no accounts, no cost:
 
-1. Get a **free Gemini API key** at [aistudio.google.com](https://aistudio.google.com/)
-2. Open ProdIntel → **Settings → AI Connection (BYOK)** → paste your key → **Test Connection**
-3. Your key is stored **only in your browser** (localStorage) and is sent **only to Google's API**. It is never bundled into the code, never committed to git, and never transmitted to AliceLabs servers.
+1. Grab any AI key you already have — Gemini (free at [aistudio.google.com](https://aistudio.google.com/)), OpenAI, Groq (free), OpenRouter, DeepSeek, Cerebras (free)…
+2. Open ProdIntel → **Settings → AI Connection** → paste the key → the provider is detected automatically → **Test Connection**
+3. Your key is stored **only in your browser** (localStorage) and is sent **only to that provider's official endpoint**. It is never bundled into the code, never committed to git, and never transmitted to Alicelabs servers.
 
 ```bash
 git clone https://github.com/alicelabs-llc/Scraper.git

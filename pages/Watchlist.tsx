@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { WatchItem, loadWatchlist, removeFromWatchlist } from '../services/watchlist';
 import { assessSource } from '../services/sourceTrust';
 import TrustBadge from '../components/TrustBadge';
+import { safeExternalUrl } from '../services/security';
 import { Language, WinningProduct } from '../types';
 import { translations } from '../translations';
 
@@ -121,8 +122,8 @@ const Watchlist: React.FC<WatchlistProps> = ({ lang, onAnalyzeProduct }) => {
                   {new Date(w.addedAt).toLocaleDateString(lang === 'zh' ? 'zh-CN' : lang, { month: 'short', day: 'numeric' })}
                 </span>
                 <div className="flex gap-2">
-                  {w.sourceUrl?.startsWith('http') && (
-                    <a href={w.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black uppercase text-text-secondary hover:text-white transition-all flex items-center gap-1">
+                  {safeExternalUrl(w.sourceUrl) && (
+                    <a href={safeExternalUrl(w.sourceUrl)!} target="_blank" rel="noopener noreferrer nofollow" className="text-[10px] font-black uppercase text-text-secondary hover:text-white transition-all flex items-center gap-1">
                       <span className="material-symbols-outlined text-[13px]">link</span> URL
                     </a>
                   )}

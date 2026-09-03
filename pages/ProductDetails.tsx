@@ -4,6 +4,7 @@ import { WinningProduct, Language } from '../types';
 import { getDeepProductAnalysis } from '../services/geminiService';
 import { translations } from '../translations';
 import TrustBadge from '../components/TrustBadge';
+import { safeExternalUrl } from '../services/security';
 import { batchVerifySources, ServerVerdict } from '../services/reputationClient';
 
 interface ProductDetailsProps {
@@ -78,8 +79,8 @@ const ProductDetails: React.FC<ProductDetailsProps> = ({ product, lang }) => {
             {loading && <span className="size-4 border-2 border-primary/20 border-t-primary rounded-full animate-spin"></span>}
           </h1>
         </div>
-        {product.sourceUrl && (
-          <a href={product.sourceUrl} target="_blank" rel="noopener noreferrer" className="px-6 py-2 bg-primary/20 border border-primary/40 text-primary hover:bg-primary hover:text-white rounded-full text-xs font-bold transition-all flex items-center gap-2 shadow-lg shadow-primary/10">
+        {product.sourceUrl && safeExternalUrl(product.sourceUrl) && (
+          <a href={safeExternalUrl(product.sourceUrl)!} target="_blank" rel="noopener noreferrer nofollow" className="px-6 py-2 bg-primary/20 border border-primary/40 text-primary hover:bg-primary hover:text-white rounded-full text-xs font-bold transition-all flex items-center gap-2 shadow-lg shadow-primary/10">
              <span className="material-symbols-outlined text-sm">open_in_new</span> {t.checkSource}
           </a>
         )}
@@ -169,7 +170,7 @@ const ProductDetails: React.FC<ProductDetailsProps> = ({ product, lang }) => {
                 <div className="flex flex-wrap gap-2">
                    {analysis?.sources?.map((s: any, i: number) => (
                      <div key={i} className="flex items-center gap-2">
-                       <a href={s.uri} target="_blank" rel="noopener noreferrer" className="px-3 py-2 bg-surface-light border border-border rounded-lg text-[10px] text-white hover:bg-primary hover:border-primary transition-all flex items-center gap-2 font-bold group flex-1 min-w-0">
+                       <a href={safeExternalUrl(s.uri) || undefined} target="_blank" rel="noopener noreferrer nofollow" className="px-3 py-2 bg-surface-light border border-border rounded-lg text-[10px] text-white hover:bg-primary hover:border-primary transition-all flex items-center gap-2 font-bold group flex-1 min-w-0">
                           <span className="material-symbols-outlined text-[14px] group-hover:animate-bounce">language</span> <span className="truncate">{s.title}</span>
                        </a>
                        <TrustBadge url={s.uri} lang={lang} compact server={serverVerdicts[domainOf(s.uri)]} />

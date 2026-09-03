@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { MetricCardProps, Language, WinningProduct } from '../types';
 import { analyzeMarketTrends } from '../services/geminiService';
 import { summarizeSources, assessSource } from '../services/sourceTrust';
+import LiveSignals from '../components/LiveSignals';
 import { translations } from '../translations';
 
 interface DashboardProps {
@@ -168,6 +169,7 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
     return (
       <div className="p-8 max-w-[1600px] mx-auto animate-in fade-in duration-500 space-y-8">
         <MarketSummary lang={lang} />
+        <LiveSignals lang={lang} limit={6} />
         <div className="bg-surface border border-border rounded-2xl p-16 text-center">
           <span className="material-symbols-outlined text-6xl text-text-secondary/40 mb-6 block">radar</span>
           <h3 className="text-white text-xl font-bold font-display">{t.emptyDash}</h3>
@@ -193,6 +195,7 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
   return (
     <div className="p-8 space-y-8 max-w-[1600px] mx-auto animate-in fade-in duration-500">
       <MarketSummary lang={lang} />
+      <LiveSignals lang={lang} limit={6} />
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <MetricCard label={t.metrics.totalNiches} value={String(cache.items.length)} change="" trend="up" icon="dataset" />
