@@ -40,7 +40,7 @@ const App: React.FC = () => {
       case 'dashboard':
         return <Dashboard lang={lang} />;
       case 'daily-hunt':
-        return <DailyFinder lang={lang} onAnalyzeProduct={handleAnalyzeProduct} />;
+        return <DailyFinder lang={lang} onAnalyzeProduct={handleAnalyzeProduct} onOpenSettings={() => setActiveTab('settings')} />;
       case 'analysis':
         return <Analysis lang={lang} niche={selectedProduct?.niche || `E-commerce ${new Date().getFullYear()}`} />;
       case 'watchlist':
@@ -52,7 +52,7 @@ const App: React.FC = () => {
       case 'details':
         return <ProductDetails lang={lang} product={selectedProduct} />;
       case 'settings':
-        return <Settings config={userConfig} onUpdate={setUserConfig} />;
+        return <Settings config={userConfig} onUpdate={setUserConfig} onNavigate={(tab) => setActiveTab(tab)} />;
       default:
         return <Dashboard lang={lang} />;
     }

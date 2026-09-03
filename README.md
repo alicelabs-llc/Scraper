@@ -18,7 +18,10 @@ Built by [AliceLabs LLC](https://alicelabs.site)
 
 ## What it does
 
-- **Universal BYOK (v5)** — paste ANY API key: ProdIntel detects the provider from its prefix (and probes official `/models` endpoints for ambiguous keys) and starts working immediately. Custom OpenAI-compatible endpoints supported (Ollama, LM Studio, vLLM, LiteLLM, gateways)
+- **Universal BYOK (v5)** — paste ANY API key: ProdIntel detects the provider from its prefix (and probes official `/models` + 1-token chat pings for ambiguous keys) and starts working immediately. Custom OpenAI-compatible endpoints supported (Ollama, LM Studio, vLLM, LiteLLM, gateways)
+- **Key vault with automatic failover (v5.1)** — store MULTIPLE keys in priority order: if one fails (invalid, out of quota, provider down), ProdIntel silently jumps to the next one, mid-request. Failed keys are marked in the UI with an honest per-key diagnosis (rejected / quota / network) and free-key links to recover in one click
+- **Infrastructure-token guard (v5.1)** — paste a Vercel (`vcp_`/`vci_`/`vca_`), GitHub (`ghp_`/`github_pat_`), Slack or AWS credential by mistake and ProdIntel explains EXACTLY what you pasted instead of showing a cryptic 401 "connection failure"
+- **Deal Score (v5.1)** — every product gets one 0-100 number (trend momentum 55% + parsed margin 35% + real source link 10%); sort by it, filter by min trend / min margin
 - **Free live market signals (v5)** — Reddit (r/dropship, r/ecommerce, r/Entrepreneur, r/BusinessIdeas, r/sidehustle), Hacker News (Algolia) and Google Trends (server-side via `/api/signals`) are scraped keylessly and fed into every AI prompt, so even non-grounding models cite REAL, just-scraped URLs
 - **Compare (v5)** — select up to 3 products, see price/margin/trend/trust side-by-side and get an AI verdict
 - **Winning product finder** — scans TikTok Shop, Amazon, and global marketplaces for trending products with high margins, grounded in live search with real source links
@@ -29,6 +32,20 @@ Built by [AliceLabs LLC](https://alicelabs.site)
 - **Niche analysis** — scores niches by opportunity level with market concentration (Gini index)
 - **AI assistant** — conversion copy for any product in seconds
 - **Multi-language** — English, Spanish, French, German, Chinese (UI + AI responses)
+
+## How it is different (honest competitive landscape)
+
+The "winning product" space is crowded — here is where ProdIntel actually differs, no marketing fog:
+
+| Tool | Model | Price | Data source | AI | BYOK | Source trust gate |
+|---|---|---|---|---|---|---|
+| **Minea** | Ad spy (FB/TikTok/Pinterest) | from ~$39/mo | Their ad-library index | Limited | ✗ | ✗ |
+| **Dropship.io** | Store/sales tracking | from ~$29/mo | Shopify revenue tracking | Limited | ✗ | ✗ |
+| **Sell The Trend** | Predictive Nexus AI | from ~$29.97/mo | Store + ad aggregates | Partial | ✗ | ✗ |
+| **PiPiAds** | TikTok ad spy | paid tiers | TikTok ad library | Limited | ✗ | ✗ |
+| **ProdIntel** | **AI research agent** | **free — your keys** | **Live AI search (Gemini grounding) + free public signals (Reddit/HN/Trends) with cited URLs** | **Full (12 providers + failover)** | ✓ | **✓ UTA reputation badges** |
+
+The real differentiators: (1) **price** — competitors are subscriptions, ProdIntel is free software where you plug the AI keys you already have; (2) **provider freedom + failover** — nobody else runs your hunt across Gemini, OpenAI, Claude, Groq, etc. and survives an outage; (3) **trust-gated sources** — the only product-research tool that verifies every cited link through a reputation engine (UTA) before you click; (4) **privacy** — keys and data never leave your browser; (5) **citations or silence** — products come with REAL, clickable, trust-checked sources, not vague "trending" claims.
 
 ## Trust & privacy (anti-hacking)
 

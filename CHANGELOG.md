@@ -1,6 +1,21 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [5.1.0] - 2026-09-03
+
+### Fixed (the "connection failure" report)
+- Root cause: the pasted credential was a VERCEL token (vcp_ family, introduced Feb 2026), not an AI API key — no AI provider can accept it. ProdIntel now detects infrastructure tokens (Vercel vcp_/vci_/vca_/vercel_, GitHub ghp_/github_pat_, Slack xox*, AWS AKIA) and explains exactly what was pasted, instead of a cryptic 401
+- BUGFIX: probeCandidates used Promise.any over promises that never reject, so live provider detection resolved with the FIRST settled result (usually an early 401's null) — a valid DeepSeek/OpenRouter key could fail detection. Replaced with allSettled + first real winner
+- Detection now also probes via a 1-token chat ping when /models endpoints are CORS-blocked or missing (Mistral, Z.ai, gateways)
+- AI errors are classified and translated (rejected / quota / network / timeout / no-provider) with a "Go to Settings" shortcut and free-key links instead of raw "connection failure"
+
+### Added
+- Key Vault with automatic failover: store multiple BYOK keys in priority order; every AI call walks the list and jumps to the next key on invalid/quota/down; per-key status dots (OK / rejected / error), reorder, per-key test
+- Instant connect: pasting a recognizable key auto-adds it to the vault and tests it immediately — "paste and it works"
+- Deal Score 0-100 (trend 55% + margin 35% + real source 10%) with sort-by-score (default) and min-trend / min-margin filters
+- Engine chip showing which provider+model served the last scan
+- scripts/smoke_v51.mjs (30 checks) covering infra detection, scoring, error classification and vault behavior
+
 ## [5.0.0] - 2026-09-03
 
 ### Added

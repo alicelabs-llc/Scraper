@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { huntWinningProducts } from '../services/geminiService';
+import { huntWinningProducts, parseAiError, lastServed } from '../services/geminiService';
 import { WinningProduct, Language } from '../types';
 import { translations } from '../translations';
 import TrustBadge from '../components/TrustBadge';
@@ -9,6 +9,9 @@ import { isWatched, toggleWatchlist, rememberScanNames, previousScanNames } from
 import { isCompared, toggleCompare } from '../services/compare';
 import { safeExternalUrl } from '../services/security';
 import { batchVerifySources, ServerVerdict } from '../services/reputationClient';
+import { marginPct, dealScore } from '../services/scoring';
+
+export { marginPct, dealScore };
 
 function domainOf(url: string | undefined): string {
   try { return url ? new URL(url).hostname.toLowerCase() : ''; } catch { return ''; }
@@ -16,6 +19,7 @@ function domainOf(url: string | undefined): string {
 
 interface DailyFinderProps {
   onAnalyzeProduct?: (product: WinningProduct) => void;
+  onOpenSettings?: () => void;
   lang: Language;
 }
 
@@ -71,19 +75,23 @@ const ProductImage: React.FC<{ src: string; alt: string; sourceUrl?: string; nam
   );
 };
 
-const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, lang }) => {
+const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, onOpenSettings, lang }) => {
   const t = translations[lang];
   const [products, setProducts] = useState<WinningProduct[]>([]);
   const [loading, setLoading] = useState(false);
   const [scanStep, setScanStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [errorKind, setErrorKind] = useState<string>('other');
   // toolbar
   const [query, setQuery] = useState('');
   const [nicheFilter, setNicheFilter] = useState('');
-  const [sortBy, setSortBy] = useState<'trend' | 'name'>('trend');
+  const [sortBy, setSortBy] = useState<'score' | 'trend' | 'name'>('score');
+  const [minTrend, setMinTrend] = useState(0);
+  const [minMargin, setMinMargin] = useState(0);
   // watchlist + new badges (tick forces re-render on toggle)
   const [watchTick, setWatchTick] = useState(0);
   const [serverVerdicts, setServerVerdicts] = useState<Record<string, ServerVerdict>>({});
+  const [engine, setEngine] = useState<{ provider: string; model: string } | null>(null);
   const prevNames = useMemo(() => previousScanNames(lang), [lang]);
 
   const downloadCSV = () => {
@@ -143,17 +151,29 @@ const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, lang }) => 
       // Validar que los resultados tengan un nombre por lo menos
       const validResults = results.filter((r: any) => r.name && r.name !== "");
       setProducts(validResults);
+      setEngine(lastServed());
       localStorage.setItem(`daily_products_v4_${lang}`, JSON.stringify({
         date: new Date().toDateString(),
         items: validResults
       }));
     } catch (err) {
       console.error("Scanning failed", err);
-      setError(
-        (err as Error)?.name === 'MissingApiKeyError'
-          ? `${t.needApiKey} — ${t.needApiKeyDesc}`
-          : `${t.errorTitle}: ${String((err as Error)?.message || err).slice(0, 160)}`
-      );
+      const parsed = parseAiError(err);
+      setErrorKind(parsed.kind);
+      const detail = String((err as Error)?.message || err).slice(0, 140);
+      let msg: string;
+      switch (parsed.kind) {
+        case 'missing': msg = `${t.needApiKey} — ${t.needApiKeyDesc}`; break;
+        case 'infra': msg = t.errInfra; break;
+        case 'rejected': msg = `${t.errRejected}${parsed.attempts?.length ? ` · ${parsed.attempts[0].provider}` : ''} — ${detail}`; break;
+        case 'quota': msg = t.errQuota; break;
+        case 'network': msg = t.errNetwork; break;
+        case 'noprovider': msg = t.errNoProvider; break;
+        case 'timeout': msg = t.errTimeout; break;
+        case 'rate': msg = detail; break;
+        default: msg = `${t.errOther}: ${detail}`;
+      }
+      setError(msg);
     } finally {
       clearInterval(logInterval);
       setLoading(false);
@@ -189,6 +209,13 @@ const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, lang }) => 
   const visible = useMemo(() => {
     let list = products;
     if (nicheFilter) list = list.filter((p) => p.niche === nicheFilter);
+    if (minTrend > 0) list = list.filter((p) => (p.trendScore || 0) >= minTrend);
+    if (minMargin > 0) {
+      list = list.filter((p) => {
+        const m = marginPct(p);
+        return !Number.isNaN(m) && m >= minMargin;
+      });
+    }
     const q = query.trim().toLowerCase();
     if (q) {
       list = list.filter((p) =>
@@ -197,10 +224,11 @@ const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, lang }) => 
         (p.reasonWhyWinning || '').toLowerCase().includes(q)
       );
     }
+    if (sortBy === 'score') list = [...list].sort((a, b) => dealScore(b) - dealScore(a));
     if (sortBy === 'trend') list = [...list].sort((a, b) => (b.trendScore || 0) - (a.trendScore || 0));
     if (sortBy === 'name') list = [...list].sort((a, b) => a.name.localeCompare(b.name));
     return list;
-  }, [products, query, nicheFilter, sortBy]);
+  }, [products, query, nicheFilter, sortBy, minTrend, minMargin]);
 
   const handleToggleWatch = (p: WinningProduct) => {
     toggleWatchlist(p);
@@ -283,6 +311,12 @@ const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, lang }) => 
                {products.length} productos identificados
              </div>
            )}
+           {!loading && engine && (
+             <div className="text-[9px] text-center text-text-secondary/60 font-mono uppercase tracking-widest flex items-center justify-center gap-1">
+               <span className="material-symbols-outlined text-[11px] text-emerald-500">bolt</span>
+               {t.engineChip}: {engine.provider} · {engine.model}
+             </div>
+           )}
         </div>
       </div>
 
@@ -293,8 +327,16 @@ const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, lang }) => 
           <span className="material-symbols-outlined text-red-500 text-3xl">error</span>
           <div className="flex-1">
             <p className="text-white font-bold text-sm">{t.errorTitle}</p>
-            <p className="text-text-secondary text-xs mt-1">{error}</p>
+            <p className="text-text-secondary text-xs mt-1 leading-relaxed">{error}</p>
           </div>
+          {['missing', 'noprovider', 'infra', 'rejected'].includes(errorKind) && onOpenSettings && (
+            <button
+              onClick={onOpenSettings}
+              className="px-5 py-2 bg-primary/20 border border-primary/40 hover:bg-primary text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all flex items-center gap-2"
+            >
+              <span className="material-symbols-outlined text-[15px]">key</span>{t.goSettings}
+            </button>
+          )}
           <button
             onClick={fetchProducts}
             className="px-5 py-2 bg-red-500/20 border border-red-500/40 hover:bg-red-500 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all"
@@ -399,11 +441,28 @@ const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, lang }) => 
               </select>
               <select
                 value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as 'trend' | 'name')}
+                onChange={(e) => setSortBy(e.target.value as 'score' | 'trend' | 'name')}
                 className="bg-surface border border-border rounded-xl px-4 py-2.5 text-sm text-white focus:ring-2 focus:ring-primary focus:outline-none transition-all"
               >
+                <option value="score">{t.sortBy}: {t.sortScore}</option>
                 <option value="trend">{t.sortBy}: {t.sortTrend}</option>
                 <option value="name">{t.sortBy}: {t.sortName}</option>
+              </select>
+              <select
+                value={minTrend}
+                onChange={(e) => setMinTrend(Number(e.target.value))}
+                className="bg-surface border border-border rounded-xl px-4 py-2.5 text-sm text-white focus:ring-2 focus:ring-primary focus:outline-none transition-all"
+              >
+                <option value={0}>{t.filterMinTrend}: 0</option>
+                {[40, 50, 60, 70].map((v) => <option key={v} value={v}>{t.filterMinTrend}: {v}</option>)}
+              </select>
+              <select
+                value={minMargin}
+                onChange={(e) => setMinMargin(Number(e.target.value))}
+                className="bg-surface border border-border rounded-xl px-4 py-2.5 text-sm text-white focus:ring-2 focus:ring-primary focus:outline-none transition-all"
+              >
+                <option value={0}>{t.filterMinMargin}: 0%</option>
+                {[30, 40, 50, 60].map((v) => <option key={v} value={v}>{t.filterMinMargin}: {v}%</option>)}
               </select>
             </div>
           )}
@@ -428,6 +487,9 @@ const DailyFinder: React.FC<DailyFinderProps> = ({ onAnalyzeProduct, lang }) => 
                         )}
                       </div>
                       <div className="absolute top-3 right-3 flex gap-1.5 z-10">
+                        <div className="px-2 py-1 bg-primary/90 text-white rounded text-[10px] font-black shadow-lg" title="Deal Score">
+                          {dealScore(product)}
+                        </div>
                         <div className="px-2 py-1 bg-emerald-500/90 text-white rounded text-[10px] font-black shadow-lg">
                           {product.trendScore}%
                         </div>

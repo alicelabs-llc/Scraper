@@ -33,8 +33,12 @@ check('sk-proj -> openai (sure)', openai?.sure === 'openai');
 const skAmbiguous = await detectFromPrefix('sk-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
 check('sk- generic -> [openai, deepseek] probe', !skAmbiguous?.sure && skAmbiguous?.candidates?.[0] === 'openai' && skAmbiguous.candidates[1] === 'deepseek');
 
-const unknownPrefix = await detectFromPrefix('vcp_' + 'A'.repeat(52));
+const unknownPrefix = await detectFromPrefix('zzz_' + 'A'.repeat(52));
 check('unknown prefix -> probe list >= 5', !unknownPrefix?.sure && unknownPrefix?.candidates?.length >= 5);
+
+// v5.1: vcp_ is now recognized as a VERCEL infra token, not an AI key
+const vcpToken = await detectFromPrefix('vcp_' + 'A'.repeat(52));
+check('vcp_ -> INFRA vercel (no probe)', !!vcpToken?.infra && vcpToken.infra.kind === 'vercel' && vcpToken.candidates.length === 0);
 
 const mistralish = await detectFromPrefix('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
 check('32+ alnum -> mistral candidate', !mistralish?.sure && mistralish?.candidates?.includes('mistral'));

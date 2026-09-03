@@ -2,26 +2,36 @@
 /**
  * client.ts — unified AI client: ONE function, EVERY provider.
  *
+ * v5.1 "Redundancy": the user asked for "varias apis, por si una no funciona".
+ * Every request now walks the Key Vault (services/ai/vault.ts) top-down:
+ *   key 1 (invalid/quota/provider-down) → key 2 → key 3 … until one answers.
+ * The response reports which key/provider served it; failed keys are marked
+ * in the vault so the UI can show honest, per-key diagnostics.
+ *
  * Flow when any request arrives:
- *   1. Resolve key (BYOK localStorage → dev env fallback).
- *   2. Resolve provider: manual choice > cached detection > prefix rules >
- *      live probe of official /models endpoints (first 200 wins).
- *   3. Route to the provider adapter (Gemini / OpenAI-compatible / Anthropic).
- *   4. Return { text, sources, provider, model }.
+ *   1. Load vault keys (BYOK localStorage → dev env fallback).
+ *   2. For each key: resolve provider (manual choice > cached detection >
+ *      prefix rules > live probe: /models, then 1-token chat ping).
+ *   3. Call the provider adapter (Gemini / OpenAI-compatible / Anthropic).
+ *   4. First success wins; every failure is recorded and classified.
  *
  * Security invariants:
  *   - Key is sanitized + charset-gated before ANY network use.
- *   - Key is sent ONLY to the official HTTPS endpoint of the provider
+ *   - Keys are sent ONLY to the official HTTPS endpoint of the provider
  *     (or the user's own custom endpoint). Never to Alicelabs servers.
  *   - Every request has a hard timeout; responses are size-capped.
  */
 
 import {
   PROVIDERS, ProviderId, ProviderInfo, ProbeResult,
-  detectFromPrefix, probeCandidates, supportsGrounding,
+  detectFromPrefix, probeCandidates, pingProbe, supportsGrounding,
 } from "./providers";
 import { MissingApiKeyError, GroundingSource } from "./types";
-import { sanitizeApiKey, looksLikeApiKey } from "../security";
+import { InfraKeyError, AiFailoverError, FailoverAttempt } from "./errors";
+import { sanitizeApiKey, looksLikeApiKey, maskKey } from "../security";
+import { orderedKeys, markKeyByKey } from "./vault";
+
+export { InfraKeyError, AiFailoverError } from "./errors";
 
 // ---------- storage ----------
 
@@ -107,13 +117,16 @@ function normalizeCustomEndpoint(base: string): string {
 }
 
 function envDevKey(): string {
-  const k = String((process.env.API_KEY as unknown as string) || (process.env.GEMINI_API_KEY as unknown as string) || "").trim();
-  return k && !k.startsWith("your_") ? k : "";
+  try {
+    const k = String((process.env.API_KEY as unknown as string) || (process.env.GEMINI_API_KEY as unknown as string) || "").trim();
+    return k && !k.startsWith("your_") ? k : "";
+  } catch { return ""; }
 }
 
 export function getApiKey(): string | null {
+  let stored: string | null = null;
   try {
-    const stored = localStorage.getItem("prodintel_api_key");
+    stored = localStorage.getItem("prodintel_api_key");
     if (stored && stored.trim().length > 10) return sanitizeApiKey(stored);
   } catch { /* fall through to env */ }
   const envKey = envDevKey();
@@ -130,15 +143,12 @@ export function setApiKey(key: string) {
 }
 
 /**
- * Resolve provider+model for the current key.
+ * Resolve provider+model for ONE key.
  * - Manual choice ('openai', 'custom', …) is honored as-is.
- * - 'auto': cached detection → prefix rules → live probe.
- * Throws MissingApiKeyError / ProviderUnresolvedError with honest messages.
+ * - 'auto': cached detection → prefix rules → live probe (/models → chat ping).
+ * Throws MissingApiKeyError / ProviderUnresolvedError / InfraKeyError.
  */
-export async function resolveAi(opts?: { allowProbe?: boolean }): Promise<ResolvedAi> {
-  const key = getApiKey();
-  if (!key) throw new MissingApiKeyError();
-
+export async function resolveForKey(key: string, opts?: { allowProbe?: boolean }): Promise<ResolvedAi> {
   const choice = getProviderChoice();
 
   // --- custom endpoint (manual) ---
@@ -164,6 +174,7 @@ export async function resolveAi(opts?: { allowProbe?: boolean }): Promise<Resolv
   // --- auto ---
   const detection = await detectFromPrefix(key);
   if (!detection) throw new ProviderUnresolvedError("KEY_FORMAT");
+  if (detection.infra) throw new InfraKeyError(detection.infra.kind);
 
   const cached = readDetected();
   if (cached && cached.fp === detection.fingerprint) {
@@ -184,8 +195,9 @@ export async function resolveAi(opts?: { allowProbe?: boolean }): Promise<Resolv
 
   // ambiguous / unknown prefix → probe (Settings connection test or first AI call)
   let probe: ProbeResult | null = null;
-  if (opts?.allowProbe !== false) {
+  if (opts?.allowProbe !== false && detection.candidates.length) {
     probe = await probeCandidates(detection.candidates, key);
+    if (!probe) probe = await pingProbe(detection.candidates, key);
   }
   if (probe) {
     writeDetected({ fp: detection.fingerprint, provider: probe.provider, models: probe.models, at: Date.now() });
@@ -195,15 +207,21 @@ export async function resolveAi(opts?: { allowProbe?: boolean }): Promise<Resolv
     return { provider: info, model, baseUrl: info.endpoint, key, grounding: supportsGrounding(info.id) };
   }
 
-  // Probe failed (offline, CORS, or the key belongs to a non-AI service).
-  // Optimistic fallback: first prefix candidate — the real call will confirm
-  // (401 → honest auth error) without blocking legitimate setups.
-  const fallbackId = detection.candidates[0];
-  if (fallbackId) {
-    const info = PROVIDERS[fallbackId];
+  // Single-candidate keys (e.g. plain sk-… → OpenAI) still get one honest
+  // optimistic attempt: the real call produces a clear 401, not a dead end.
+  if (detection.candidates.length === 1) {
+    const info = PROVIDERS[detection.candidates[0]];
     return { provider: info, model: info.defaultModel, baseUrl: info.endpoint, key, grounding: supportsGrounding(info.id) };
   }
+
   throw new ProviderUnresolvedError("NO_PROVIDER");
+}
+
+/** Legacy single-key resolution (first vault key / env fallback). */
+export async function resolveAi(opts?: { allowProbe?: boolean }): Promise<ResolvedAi> {
+  const key = getApiKey();
+  if (!key) throw new MissingApiKeyError();
+  return resolveForKey(key, opts);
 }
 
 /** Clear cached detection (call when the key or manual provider changes). */
@@ -230,6 +248,7 @@ export interface AiResponse {
 }
 
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024; // 4MB sanity cap
+const MAX_FAILOVER_KEYS = 4;                // per request: vault[0..3]
 
 async function fetchJson(url: string, init: RequestInit): Promise<any> {
   const res = await fetch(url, init);
@@ -345,41 +364,117 @@ async function callAnthropic(ai: ResolvedAi, req: AiRequest, signal: AbortSignal
   return { text, sources: [], provider: "anthropic", model: data?.model || ai.model };
 }
 
-// ---------- public API ----------
-
-export async function aiGenerate(req: AiRequest): Promise<AiResponse> {
-  const ai = await resolveAi({ allowProbe: true });
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), req.timeoutMs || 90_000);
-  try {
-    switch (ai.provider.kind) {
-      case "gemini": return await callGemini(ai, req, ctrl.signal);
-      case "anthropic": return await callAnthropic(ai, req, ctrl.signal);
-      default: return await callOpenAiCompatible(ai, req, ctrl.signal);
-    }
-  } finally {
-    clearTimeout(timer);
+async function callWith(ai: ResolvedAi, req: AiRequest, signal: AbortSignal): Promise<AiResponse> {
+  switch (ai.provider.kind) {
+    case "gemini": return callGemini(ai, req, signal);
+    case "anthropic": return callAnthropic(ai, req, signal);
+    default: return callOpenAiCompatible(ai, req, signal);
   }
 }
 
-/** Cheap connectivity check used by Settings: resolve + 1-token ping. */
+// ---------- public API (failover across the vault) ----------
+
+let lastServedInfo: { provider: string; model: string; at: number } | null = null;
+
+/** Which key/provider served the last successful AI call (for UI badges). */
+export function lastServed(): { provider: string; model: string } | null {
+  return lastServedInfo ? { provider: lastServedInfo.provider, model: lastServedInfo.model } : null;
+}
+
+export async function aiGenerate(req: AiRequest): Promise<AiResponse> {
+  // Build the ordered candidate list: vault keys first, dev env as last resort.
+  const keys = await orderedKeys();
+  if (getApiKey() && !keys.includes(getApiKey()!)) keys.unshift(getApiKey()!);
+  if (!keys.length) {
+    const envKey = envDevKey();
+    if (envKey) keys.push(sanitizeApiKey(envKey));
+  }
+  if (!keys.length) throw new MissingApiKeyError();
+
+  const attempts: FailoverAttempt[] = [];
+  for (const key of keys.slice(0, MAX_FAILOVER_KEYS)) {
+    let ai: ResolvedAi;
+    try {
+      ai = await resolveForKey(key, { allowProbe: true });
+    } catch (err) {
+      const name = (err as Error)?.name || "";
+      const msg = String((err as Error)?.message || err || "");
+      if (name === "InfraKeyError") {
+        attempts.push({ provider: "—", keyLabel: maskKey(key).slice(0, 10), error: msg });
+        continue; // infra tokens are skipped, the vault tries the next key
+      }
+      if (name === "ProviderUnresolvedError" && msg !== "CUSTOM_NO_BASE") {
+        attempts.push({ provider: "—", keyLabel: maskKey(key).slice(0, 10), error: msg });
+        continue;
+      }
+      attempts.push({ provider: "—", keyLabel: maskKey(key).slice(0, 10), error: msg.slice(0, 80) });
+      continue;
+    }
+
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), req.timeoutMs || 90_000);
+    try {
+      const res = await callWith(ai, req, ctrl.signal);
+      lastServedInfo = { provider: res.provider, model: res.model, at: Date.now() };
+      void markKeyByKey(key, "ok");
+      return res;
+    } catch (err) {
+      const msg = String((err as Error)?.message || err || "");
+      const status = (err as any)?.status;
+      if (status === 401 || status === 403) {
+        void markKeyByKey(key, "invalid", msg.slice(0, 120));
+      } else {
+        void markKeyByKey(key, "error", msg.slice(0, 120));
+      }
+      attempts.push({ provider: ai.provider.name, keyLabel: maskKey(key).slice(0, 10), error: msg.slice(0, 120) });
+      // 401/403/429/5xx/network → try the next key in the vault.
+      continue;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  throw new AiFailoverError(attempts);
+}
+
+/** Cheap connectivity check used by Settings: full failover walk + per-key report. */
 export async function testConnectionFast(): Promise<{
   ok: boolean; detail: string; provider?: string; model?: string;
+  attempts?: FailoverAttempt[];
 }> {
   try {
-    const ai = await resolveAi({ allowProbe: true });
-    const res = await aiGenerate({
-      prompt: "ping",
-      maxTokens: 5,
-      timeoutMs: 20_000,
-    });
+    const res = await aiGenerate({ prompt: "ping", maxTokens: 5, timeoutMs: 20_000 });
     return { ok: true, detail: res.text?.trim().slice(0, 40) || "ok", provider: res.provider, model: res.model };
   } catch (err: any) {
     const name = err?.name || "Error";
     const msg = String(err?.message || err);
+    if (name === "AiFailoverError") {
+      return { ok: false, detail: "ALL_PROVIDERS_FAILED", attempts: (err as AiFailoverError).attempts };
+    }
     if (name === "MissingApiKeyError") return { ok: false, detail: "MISSING_API_KEY" };
+    if (name === "InfraKeyError") return { ok: false, detail: msg };
     if (msg.includes("HTTP_401") || msg.includes("HTTP_403")) return { ok: false, detail: `KEY_REJECTED (${msg.slice(0, 60)})` };
     return { ok: false, detail: `${name}: ${msg.slice(0, 100)}` };
+  }
+}
+
+/** Test ONE key in isolation (Settings vault row "Test" button). */
+export async function pingKey(key: string): Promise<{
+  ok: boolean; provider?: string; model?: string; error?: string;
+}> {
+  try {
+    const ai = await resolveForKey(key, { allowProbe: true });
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 20_000);
+    try {
+      const res = await callWith(ai, { prompt: "ping", maxTokens: 5, timeoutMs: 20_000 }, ctrl.signal);
+      lastServedInfo = { provider: res.provider, model: res.model, at: Date.now() };
+      return { ok: true, provider: res.provider, model: res.model };
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (err) {
+    return { ok: false, error: String((err as Error)?.message || err).slice(0, 120) };
   }
 }
 

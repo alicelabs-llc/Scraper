@@ -32,6 +32,11 @@ export { MissingApiKeyError } from "./ai/types";
 export type { GroundingSource, WinningProductRaw } from "./ai/types";
 export { getApiKey, setApiKey } from "./ai/client";
 export { providerSummary, invalidateDetection } from "./ai/client";
+export { lastServed } from "./ai/client";
+export { parseAiError } from "./ai/errors";
+export type { ParsedAiError } from "./ai/errors";
+export { addToVault, removeFromVault, getVault, moveVault, VAULT_EVENT } from "./ai/vault";
+export type { VaultEntry } from "./ai/vault";
 
 // Legacy model helpers — kept so older imports keep working.
 export const getModel = (quality = false): string => {
@@ -93,12 +98,18 @@ const unwrapArray = <T,>(data: unknown, key: string): T[] => {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const isFatal = (err: unknown): boolean => {
+  const name = (err as Error)?.name || "";
   const msg = String((err as Error)?.message || err || "");
+  // v5.1: aiGenerate already walked the whole key vault — retrying the same
+  // list here would only burn the user's quota. Failover errors are final.
+  if (name === "AiFailoverError" || name === "InfraKeyError") return true;
   return (
     msg.includes("MISSING_API_KEY") ||
     msg.includes("KEY_REJECTED") ||
     msg.includes("KEY_FORMAT") ||
     msg.includes("NO_PROVIDER") ||
+    msg.includes("ALL_PROVIDERS_FAILED") ||
+    msg.includes("INFRA_KEY") ||
     msg.includes("CUSTOM_NO_") ||
     msg.includes("API key not valid") ||
     msg.includes("permission") ||
@@ -282,20 +293,24 @@ export const generateProductDescription = async (
   return withRetry(run);
 };
 
-// Quick connectivity test used by Settings — resolves provider (with probe)
-// and sends a 5-token ping. Locally rate-limited to stop brute-force spam.
-export const testConnection = async (): Promise<{ ok: boolean; detail: string }> => {
+// Quick connectivity test used by Settings — walks the whole vault (failover)
+// and returns a per-key report so the UI can show WHAT failed and WHY.
+// Locally rate-limited to stop brute-force spam.
+export const testConnection = async (): Promise<{
+  ok: boolean; detail: string;
+  attempts?: { provider: string; keyLabel: string; error: string }[];
+}> => {
   if (!rateLimitLocal("conn_test", 12, 60_000)) {
     return { ok: false, detail: "RATE_LIMITED: too many tests per minute." };
   }
   try {
     const fast = await testConnectionFast();
     if (fast.ok && fast.provider) {
-      return { ok: true, detail: `${fast.provider} · ${fast.model}` };
+      return { ok: true, detail: `${fast.provider} · ${fast.model}`, attempts: fast.attempts };
     }
     if (fast.ok) {
       const { provider, model } = await resolveAi({ allowProbe: false });
-      return { ok: true, detail: `${provider.name} · ${model}` };
+      return { ok: true, detail: `${provider.name} · ${model}`, attempts: fast.attempts };
     }
     return fast;
   } catch (err) {

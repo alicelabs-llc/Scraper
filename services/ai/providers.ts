@@ -207,6 +207,26 @@ interface PrefixRule {
   candidates?: ProviderId[];
 }
 
+/**
+ * Infrastructure credentials that will NEVER be an AI key. Users paste
+ * deploy tokens by mistake (it happened: a Vercel vcp_ token) — detecting
+ * them here lets the UI explain instead of a cryptic 401.
+ */
+export interface InfraIdentity { kind: "vercel" | "github" | "slack" | "aws"; name: string }
+const INFRA_RULES: { test: (k: string) => boolean; id: InfraIdentity }[] = [
+  { test: (k) => /^vcp_/.test(k), id: { kind: "vercel", name: "Vercel" } },
+  { test: (k) => /^vci_/.test(k), id: { kind: "vercel", name: "Vercel" } },
+  { test: (k) => /^vca_/.test(k), id: { kind: "vercel", name: "Vercel" } },
+  { test: (k) => /^vercel_/.test(k), id: { kind: "vercel", name: "Vercel" } },
+  { test: (k) => /^gh[pousr]_/.test(k) || k.startsWith("github_pat_"), id: { kind: "github", name: "GitHub" } },
+  { test: (k) => /^xox[bpas]-/.test(k), id: { kind: "slack", name: "Slack" } },
+  { test: (k) => /^AKIA/.test(k), id: { kind: "aws", name: "AWS" } },
+];
+export function detectInfraKey(key: string): InfraIdentity | null {
+  for (const r of INFRA_RULES) if (r.test(key)) return r.id;
+  return null;
+}
+
 const PREFIX_RULES: PrefixRule[] = [
   { test: (k) => k.startsWith("AIza"), sure: "gemini" },
   { test: (k) => k.startsWith("sk-ant-"), sure: "anthropic" },
@@ -229,6 +249,8 @@ export interface PrefixDetection {
   sure?: ProviderId;
   candidates: ProviderId[];
   fingerprint: string;
+  /** Set when the key is an infrastructure token (Vercel/GitHub/…), not AI. */
+  infra?: InfraIdentity;
 }
 
 /** Fast, offline detection. Returns candidates (≥1) for ANY plausible key. */
@@ -236,6 +258,10 @@ export async function detectFromPrefix(rawKey: string): Promise<PrefixDetection 
   const key = rawKey.trim();
   if (!looksLikeApiKey(key)) return null;
   const fingerprint = (await sha256Hex(key)).slice(0, 16);
+  const infra = detectInfraKey(key);
+  if (infra) {
+    return { key, candidates: [], fingerprint, infra };
+  }
   for (const rule of PREFIX_RULES) {
     if (rule.test(key)) {
       return { key, sure: rule.sure, candidates: rule.sure ? [rule.sure] : (rule.candidates || []), fingerprint };
@@ -288,15 +314,62 @@ async function probeOne(provider: ProviderId, key: string, timeoutMs = 6000): Pr
 /**
  * Probe ambiguous candidates in parallel; first provider that answers 200
  * with a model list wins. Returns null when nobody accepts the key.
+ *
+ * v5.1 FIX: probeOne never rejects (it resolves null on failure), so the
+ * old Promise.any resolved with the FIRST settled value — usually an early
+ * 401's null — without waiting for the other probes. A valid DeepSeek key,
+ * for example, could end up "unresolved" just because OpenAI answered 401
+ * faster. We now use allSettled and pick the first REAL winner.
  */
 export async function probeCandidates(candidates: ProviderId[], key: string): Promise<ProbeResult | null> {
-  const attempts = candidates.map(async (c) => probeOne(c, key));
-  try {
-    const winner = await Promise.any(attempts);
-    return winner || null;
-  } catch {
-    return null;
+  const settled = await Promise.allSettled(candidates.map((c) => probeOne(c, key)));
+  for (const s of settled) {
+    if (s.status === "fulfilled" && s.value) return s.value;
   }
+  return null;
+}
+
+/**
+ * Chat-ping probe (v5.1): some /models endpoints are CORS-blocked or don't
+ * exist, which made live detection fail even for VALID keys. A 1-token chat
+ * request is the honest test — it uses exactly the path the app will use.
+ * Costs ~1 token on success; failed auth (401) costs nothing.
+ */
+export async function pingProbe(candidates: ProviderId[], key: string): Promise<ProbeResult | null> {
+  const attempts = candidates.map(async (c) => {
+    const info = PROVIDERS[c];
+    if (!info.endpoint) return null;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      let url = info.endpoint;
+      const headers: Record<string, string> = { "Content-Type": "application/json", ...(info.headers || {}) };
+      let body: string;
+      if (info.kind === "gemini") {
+        url = `${info.endpoint}/${info.defaultModel}:generateContent`;
+        headers["x-goog-api-key"] = key;
+        body = JSON.stringify({ contents: [{ role: "user", parts: [{ text: "ping" }] }], generationConfig: { maxOutputTokens: 1 } });
+      } else if (info.kind === "anthropic") {
+        headers["x-api-key"] = key;
+        body = JSON.stringify({ model: info.defaultModel, max_tokens: 1, messages: [{ role: "user", content: "ping" }] });
+      } else {
+        headers["Authorization"] = `Bearer ${key}`;
+        body = JSON.stringify({ model: info.defaultModel, max_tokens: 1, messages: [{ role: "user", content: "ping" }] });
+      }
+      const res = await fetch(url, { method: "POST", headers, body, signal: ctrl.signal });
+      if (res.status === 200) return { provider: c, models: [] as string[] };
+      return null;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+  const settled = await Promise.allSettled(attempts);
+  for (const s of settled) {
+    if (s.status === "fulfilled" && s.value) return s.value;
+  }
+  return null;
 }
 
 /** Does this provider expose the Google Search grounding tool? */
